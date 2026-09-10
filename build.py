@@ -21,7 +21,8 @@ BOOTSTRAP_SRC = ROOT / "hook" / "bootstrap"
 IMPL_SRC = ROOT / "hook" / "impl"
 LIBS = ROOT / "tools" / "libs"
 SMALI3 = ROOT / "tools" / "smali3"
-R8_JAR = ROOT / "tools" / "r8-9.4.17.jar"
+R8_CANDIDATES = sorted((ROOT / "tools").glob("r8*.jar"))
+R8_JAR = R8_CANDIDATES[0] if R8_CANDIDATES else ROOT / "tools" / "r8.jar"
 BUILD = ROOT / "build" / "hook"
 PATCHER = ROOT / "patcher" / "farewell_patch.py"
 

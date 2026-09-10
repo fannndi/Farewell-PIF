@@ -21,9 +21,11 @@ import base64
 import hashlib
 import json
 import os
+import shlex
 import subprocess
 import sys
 import tempfile
+import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
@@ -91,6 +93,17 @@ def settings_put(adb_bin, key, value):
 
 def settings_get(adb_bin, key):
     return adb(adb_bin, ["shell", "settings", "get", "global", key], check=False)
+
+
+def wait_setting(adb_bin, key, predicate, timeout=20.0):
+    """App ops run on a background thread, so poll until the write lands."""
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        value = settings_get(adb_bin, key)
+        if predicate(value):
+            return value
+        time.sleep(0.5)
+    return None
 
 
 def settings_delete(adb_bin, key):
@@ -189,12 +202,17 @@ def app_installed(adb_bin):
 
 
 def run_app_op(adb_bin, op, extras=None):
-    """MIUI: shell has no WRITE_SECURE_SETTINGS, so settings writes go through the priv-app."""
-    cmd = ["shell", "am", "start", "-n", "dev.farewell.pif/.app.MainActivity",
-           "--es", "op", op]
+    """MIUI: shell has no WRITE_SECURE_SETTINGS, so settings writes go through the priv-app.
+
+    The whole command is sent as ONE device-shell string with each argument quoted,
+    otherwise the device shell strips the JSON quotes before the app sees them.
+    """
+    parts = ["am", "start", "-n", "dev.farewell.pif/.app.MainActivity",
+             "--es", "op", op]
     if extras:
-        cmd += extras
-    return adb(adb_bin, cmd, check=False)
+        parts += extras
+    cmd = " ".join(shlex.quote(part) for part in parts)
+    return adb(adb_bin, ["shell", cmd], check=False)
 
 
 def chunk_extras(prefix, value, size=6000):
@@ -208,6 +226,8 @@ def push_config(adb_bin, config):
     payload = json.dumps(config, separators=(",", ":"))
     if app_installed(adb_bin):
         run_app_op(adb_bin, "set_config", chunk_extras("cfg_", payload))
+        if wait_setting(adb_bin, NEUTRAL_KEY, lambda v: bool(v) and v.startswith("F1:")) is None:
+            raise SystemExit("config write via app timed out (check: adb logcat -s FarewellPIF)")
         return
     settings_put(adb_bin, NEUTRAL_KEY, encode_envelope(config))
     for legacy in LEGACY_KEYS:
@@ -217,6 +237,8 @@ def push_config(adb_bin, config):
 def hook_install(adb_bin, dex_path):
     if app_installed(adb_bin):
         run_app_op(adb_bin, "install_hook")
+        if wait_setting(adb_bin, HOOK_META, lambda v: bool(v) and v != "null") is None:
+            raise SystemExit("hook install via app timed out (check: adb logcat -s FarewellPIF)")
         print("hook install requested via app")
         return
     install_hook(adb_bin, dex_path)
@@ -225,6 +247,8 @@ def hook_install(adb_bin, dex_path):
 def hook_remove(adb_bin):
     if app_installed(adb_bin):
         run_app_op(adb_bin, "remove_hook")
+        if wait_setting(adb_bin, HOOK_META, lambda v: not v or v == "null") is None:
+            raise SystemExit("hook removal via app timed out (check: adb logcat -s FarewellPIF)")
         print("hook removal requested via app")
         return
     settings_delete(adb_bin, HOOK_META)
@@ -369,14 +393,13 @@ def main():
         print("profile applied from %s" % args.profile)
         changed = True
 
+    keybox_pending = None
     if args.keybox:
         if args.keybox.startswith("http://") or args.keybox.startswith("https://"):
             raise SystemExit("network fetching is disabled; download the keybox yourself")
         data = Path(args.keybox).read_bytes()
         if app_installed(adb_bin):
-            encoded = base64.b64encode(data).decode("ascii")
-            run_app_op(adb_bin, "set_keybox", chunk_extras("kb_", encoded))
-            print("keybox sent to the app (%d bytes)" % len(data))
+            keybox_pending = base64.b64encode(data).decode("ascii")
         else:
             _install_keybox(config, data, args.keybox)
         config["en"] = 1
@@ -390,6 +413,9 @@ def main():
             hook_install(adb_bin, str(HOOK_DEX))
         elif config.get("en") == 0:
             hook_remove(adb_bin)
+        if keybox_pending:
+            run_app_op(adb_bin, "set_keybox", chunk_extras("kb_", keybox_pending))
+            print("keybox sent to the app (%d bytes)" % (len(keybox_pending) * 3 // 4))
         if not args.no_restart:
             force_stop(adb_bin)
         print("done")

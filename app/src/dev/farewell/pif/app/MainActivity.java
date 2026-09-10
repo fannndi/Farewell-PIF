@@ -173,21 +173,7 @@ public class MainActivity extends Activity {
 
     /** ",android,self,<target packages>," allowlist for the bootstrap (non-targets skip the dex). */
     private String gateValue(JSONObject config) {
-        java.util.LinkedHashSet<String> set = new java.util.LinkedHashSet<String>();
-        set.add("android");
-        set.add(getPackageName());
-        JSONArray targets = config.optJSONArray("tg");
-        if (targets != null) {
-            for (int i = 0; i < targets.length(); i++) {
-                String rule = targets.optString(i, "");
-                if (rule.isEmpty()) continue;
-                String pkg = rule.contains(":") ? rule.substring(0, rule.indexOf(':')) : rule;
-                if (!pkg.endsWith("*")) set.add(pkg);
-            }
-        }
-        StringBuilder builder = new StringBuilder(",");
-        for (String pkg : set) builder.append(pkg).append(',');
-        return builder.toString();
+        return HookStore.gateValue(this, config);
     }
 
     /** Replicates the bootstrap dex load to pinpoint failures over ADB (no repack needed). */
@@ -397,88 +383,29 @@ public class MainActivity extends Activity {
     // ------------------------------------------------------------------ config
 
     private String getString(String key) {
-        try {
-            return Settings.Global.getString(getContentResolver(), key);
-        } catch (Throwable t) {
-            return null;
-        }
+        return HookStore.getString(this, key);
     }
 
     private void putString(String key, String value) {
-        Settings.Global.putString(getContentResolver(), key, value);
+        HookStore.putString(this, key, value);
     }
 
     private void deleteKey(String key) {
-        try {
-            Settings.Global.putString(getContentResolver(), key, null);
-        } catch (Throwable ignored) {
-        }
+        HookStore.deleteKey(this, key);
     }
 
     private JSONObject readConfig() {
-        try {
-            String raw = getString(KEY);
-            String json = null;
-            if (raw != null && !raw.isEmpty()) {
-                if (raw.startsWith("{")) {
-                    json = raw;
-                } else if (raw.startsWith("F1:")) {
-                    byte[] decoded = Base64.decode(raw.substring(3), Base64.DEFAULT);
-                    json = new String(xor(decoded), StandardCharsets.UTF_8);
-                }
-            }
-            if (json == null) json = migrateLegacy();
-            if (json == null) json = DEFAULT_CONFIG;
-            return new JSONObject(json);
-        } catch (Throwable t) {
-            try {
-                return new JSONObject(DEFAULT_CONFIG);
-            } catch (Throwable ignored) {
-                throw new RuntimeException(t);
-            }
-        }
-    }
-
-    private String migrateLegacy() {
-        try {
-            if (!"1".equals(getString("farewell_enable"))) return null;
-            JSONObject config = new JSONObject(DEFAULT_CONFIG);
-            config.put("en", 1);
-            String flags = getString("farewell_flags");
-            if (flags != null) config.put("fl", Integer.parseInt(flags.trim()));
-            String mode = getString("farewell_mode");
-            if (mode != null) config.put("md", mode);
-            String profile = getString("farewell_profile");
-            if (profile != null && !profile.isEmpty()) config.put("pf", new JSONObject(profile));
-            String targets = getString("farewell_targets");
-            if (targets != null && !targets.isEmpty()) config.put("tg", new JSONArray(targets));
-            String keybox = getString("farewell_keybox");
-            if (keybox != null && !keybox.isEmpty()) config.put("kb", new JSONArray().put(keybox));
-            String features = getString("farewell_features");
-            if (features != null && !features.isEmpty()) config.put("ft", new JSONObject(features));
-            if ("1".equals(getString("farewell_debug"))) config.put("dbg", 1);
-            return config.toString();
-        } catch (Throwable t) {
-            return null;
-        }
+        return HookStore.readConfig(this);
     }
 
     private void writeConfig(JSONObject config) {
-        try {
-            byte[] encoded = xor(config.toString().getBytes(StandardCharsets.UTF_8));
-            putString(KEY, "F1:" + Base64.encodeToString(encoded, Base64.NO_WRAP));
-            for (String legacy : LEGACY_KEYS) deleteKey(legacy);
-        } catch (Throwable t) {
-            toast("Save failed: " + t.getMessage());
+        if (!HookStore.writeConfig(this, config)) {
+            toast("Save failed");
         }
     }
 
     private static byte[] xor(byte[] data) {
-        byte[] out = new byte[data.length];
-        for (int i = 0; i < data.length; i++) {
-            out[i] = (byte) (data[i] ^ XOR_KEY[i % XOR_KEY.length]);
-        }
-        return out;
+        return HookStore.xor(data);
     }
 
     // ------------------------------------------------------------------ bridge
@@ -1008,71 +935,22 @@ public class MainActivity extends Activity {
 
     /** Removes the hot-loaded hook so no process pays the dex load cost while disabled. */
     private void removeHook() {
-        deleteKey(HOOK_META);
-        deleteKey(HOOK_GATE);
-        for (int i = 0; i < HOOK_MAX_CHUNKS; i++) {
-            deleteKey(HOOK_CHUNK + i);
-        }
+        HookStore.removeHook(this);
         killGms(false);
     }
 
-    /** Writes the bundled hook dex into Settings.Global for the bootstrap to hot-load. */
+    /** Writes the bundled hook dex; restarts GMS only when the channel actually changed. */
     private String installHook() {
+        String result = HookStore.installHook(this);
         try {
-            byte[] dex = readAll(getAssets().open("hook.dex"));
-            MessageDigest digest = MessageDigest.getInstance("SHA-256");
-            byte[] hash = digest.digest(dex);
-            StringBuilder sha = new StringBuilder();
-            for (byte value : hash) sha.append(String.format("%02x", value));
-            String shaHex = sha.toString();
-
-            int chunks = (dex.length + HOOK_CHUNK_SIZE - 1) / HOOK_CHUNK_SIZE;
-            if (chunks > HOOK_MAX_CHUNKS) {
-                return "{\"ok\":false,\"error\":\"hook dex too large\"}";
+            JSONObject json = new JSONObject(result);
+            if (json.optBoolean("ok", false) && !json.optBoolean("cached", false)) {
+                killGms(false);
             }
-            String version = "1";
-            try {
-                version = getPackageManager().getPackageInfo(getPackageName(), 0).versionName;
-            } catch (Throwable ignored) {
-            }
-
-            String current = getString(HOOK_META);
-            if (current != null && current.startsWith(shaHex + ":")
-                    && current.endsWith(":" + version)) {
-                putString(HOOK_GATE, gateValue(readConfig()));
-                JSONObject cached = new JSONObject();
-                cached.put("ok", true);
-                cached.put("cached", true);
-                cached.put("sha", shaHex);
-                cached.put("chunks", chunks);
-                cached.put("version", version);
-                cached.put("size", dex.length);
-                return cached.toString();
-            }
-
-            for (int i = 0; i < chunks; i++) {
-                int from = i * HOOK_CHUNK_SIZE;
-                int to = Math.min(dex.length, from + HOOK_CHUNK_SIZE);
-                byte[] part = java.util.Arrays.copyOfRange(dex, from, to);
-                putString(HOOK_CHUNK + i, Base64.encodeToString(xor(part), Base64.NO_WRAP));
-            }
-            for (int i = chunks; i < HOOK_MAX_CHUNKS; i++) {
-                deleteKey(HOOK_CHUNK + i);
-            }
-            putString(HOOK_META, shaHex + ":" + chunks + ":" + version);
-            putString(HOOK_GATE, gateValue(readConfig()));
+        } catch (Throwable ignored) {
             killGms(false);
-
-            JSONObject out = new JSONObject();
-            out.put("ok", true);
-            out.put("sha", shaHex);
-            out.put("chunks", chunks);
-            out.put("version", version);
-            out.put("size", dex.length);
-            return out.toString();
-        } catch (Throwable t) {
-            return "{\"ok\":false,\"error\":\"" + escape(t.getMessage()) + "\"}";
         }
+        return result;
     }
 
     // ------------------------------------------------------------------ helpers

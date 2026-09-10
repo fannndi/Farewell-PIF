@@ -236,8 +236,17 @@ def push_config(adb_bin, config):
 
 def hook_install(adb_bin, dex_path):
     if app_installed(adb_bin):
+        expected = None
+        path = Path(dex_path)
+        if path.exists():
+            expected = hashlib.sha256(path.read_bytes()).hexdigest()
         run_app_op(adb_bin, "install_hook")
-        if wait_setting(adb_bin, HOOK_META, lambda v: bool(v) and v != "null") is None:
+        if expected:
+            meta = wait_setting(adb_bin, HOOK_META,
+                                lambda v: bool(v) and v.startswith(expected + ":"))
+        else:
+            meta = wait_setting(adb_bin, HOOK_META, lambda v: bool(v) and v != "null")
+        if meta is None:
             raise SystemExit("hook install via app timed out (check: adb logcat -s FarewellPIF)")
         print("hook install requested via app")
         return

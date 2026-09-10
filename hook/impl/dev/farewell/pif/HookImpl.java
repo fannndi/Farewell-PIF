@@ -18,6 +18,7 @@ import java.security.cert.Certificate;
 import java.security.cert.X509Certificate;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * Rootless framework entry points.
@@ -32,6 +33,12 @@ public final class HookImpl {
             new ConcurrentHashMap<String, Generated>();
     private static volatile int sTeeState; // 0 unknown, 1 works, 2 broken
     private static final ThreadLocal<Boolean> sProbeActive = new ThreadLocal<Boolean>();
+    private static final ThreadLocal<Boolean> sSelfTest = new ThreadLocal<Boolean>();
+    private static final AtomicInteger sStatKeygen = new AtomicInteger();
+    private static final AtomicInteger sStatChain = new AtomicInteger();
+    private static final AtomicInteger sStatKeyEntry = new AtomicInteger();
+    private static final AtomicInteger sStatProperty = new AtomicInteger();
+    private static final AtomicInteger sStatImport = new AtomicInteger();
     private static final java.util.ArrayDeque<String> sEvents =
             new java.util.ArrayDeque<String>();
     private static final int MAX_EVENTS = 64;
@@ -61,6 +68,100 @@ public final class HookImpl {
         } catch (Throwable t) {
             return "[]";
         }
+    }
+
+    /** Per-process interception counters, for verification over ADB/logcat. */
+    public static String getStats() {
+        try {
+            org.json.JSONObject out = new org.json.JSONObject();
+            out.put("keygen", sStatKeygen.get());
+            out.put("chain", sStatChain.get());
+            out.put("keyEntry", sStatKeyEntry.get());
+            out.put("property", sStatProperty.get());
+            out.put("import", sStatImport.get());
+            out.put("tee", sTeeState == 1 ? "works" : sTeeState == 2 ? "broken" : "unknown");
+            return out.toString();
+        } catch (Throwable t) {
+            return "{}";
+        }
+    }
+
+    /**
+     * End-to-end attestation check in the calling process: generates an attested key, forces the
+     * hook to apply even in a non-target process (explicit action only) and reports whether the
+     * returned leaf is keybox-signed. Used by the app button and tools/verify.py.
+     */
+    public static String selfTest() {
+        org.json.JSONObject out = new org.json.JSONObject();
+        String alias = "farewell_selftest_" + Process.myPid();
+        KeyStore keyStore = null;
+        sSelfTest.set(Boolean.TRUE);
+        try {
+            Config.Snapshot cfg = Config.get();
+            out.put("enabled", cfg.enabled);
+            out.put("keyboxEnabled", cfg.keyboxEnabled());
+            out.put("package", Config.currentPackage());
+            out.put("target", cfg.isTarget(Config.currentPackage(), currentProcessName()));
+
+            keyStore = KeyStore.getInstance("AndroidKeyStore");
+            keyStore.load(null);
+            try {
+                keyStore.deleteEntry(alias);
+            } catch (Throwable ignored) {
+            }
+
+            KeyPairGenerator generator = KeyPairGenerator.getInstance("EC", "AndroidKeyStore");
+            KeyGenParameterSpec spec = new KeyGenParameterSpec.Builder(
+                    alias, KeyProperties.PURPOSE_SIGN | KeyProperties.PURPOSE_VERIFY)
+                    .setDigests(KeyProperties.DIGEST_SHA256)
+                    .setAttestationChallenge("farewell-selftest".getBytes("UTF-8"))
+                    .build();
+            generator.initialize(spec);
+            KeyPair pair = generator.generateKeyPair();
+            out.put("keygen", pair != null && pair.getPrivate() != null);
+
+            java.security.cert.Certificate[] chain = keyStore.getCertificateChain(alias);
+            out.put("chainLength", chain != null ? chain.length : 0);
+            boolean forged = false;
+            String issuer = "";
+            String subject = "";
+            if (chain != null && chain.length > 0 && chain[0] instanceof X509Certificate) {
+                X509Certificate leaf = (X509Certificate) chain[0];
+                if (leaf.getIssuerDN() != null) issuer = leaf.getIssuerDN().getName();
+                if (leaf.getSubjectDN() != null) subject = leaf.getSubjectDN().getName();
+                Keybox.Entry kb = Keybox.forAlgorithm(cfg, leaf.getPublicKey().getAlgorithm());
+                forged = kb != null && Keybox.isIssuedBy(leaf, kb);
+            }
+            out.put("forged", forged);
+            out.put("issuer", issuer);
+            out.put("subject", subject);
+            out.put("stats", new org.json.JSONObject(getStats()));
+            out.put("events", new org.json.JSONArray(getEvents()));
+            out.put("ok", forged);
+            if (!forged) {
+                out.put("hint", "hook inactive in this process, keybox missing/invalid "
+                        + "or attestation forge failed");
+            }
+        } catch (Throwable t) {
+            try {
+                out.put("ok", false);
+                out.put("error", t.toString());
+                out.put("stats", new org.json.JSONObject(getStats()));
+                out.put("events", new org.json.JSONArray(getEvents()));
+            } catch (Throwable ignored) {
+            }
+        } finally {
+            sSelfTest.remove();
+            try {
+                if (keyStore == null) {
+                    keyStore = KeyStore.getInstance("AndroidKeyStore");
+                    keyStore.load(null);
+                }
+                keyStore.deleteEntry(alias);
+            } catch (Throwable ignored) {
+            }
+        }
+        return out.toString();
     }
 
     static final class Generated {
@@ -142,6 +243,7 @@ public final class HookImpl {
             }
             response.metadata.certificate = forged;
             response.metadata.certificateChain = kb.chainBytes();
+            sStatKeyEntry.incrementAndGet();
             recordEvent("keyEntry", (alias != null ? alias : "?") + " forged alg=" + kb.algorithm);
             return response;
         } catch (Throwable t) {
@@ -198,6 +300,7 @@ public final class HookImpl {
             if (cfg == null || !cfg.enabled) return null;
             if (!cfg.isTarget(Config.currentPackage(), currentProcessName())) return null;
             String value = cfg.spoofProperty(key);
+            if (value != null) sStatProperty.incrementAndGet();
             return value != null ? value : null;
         } catch (Throwable t) {
             return null;
@@ -271,6 +374,7 @@ public final class HookImpl {
                 }
             }
             out.put("keyboxes", keyboxes);
+            out.put("stats", new org.json.JSONObject(getStats()));
             return out.toString();
         } catch (Throwable t) {
             return "{\"error\":\"" + t + "\"}";
@@ -296,6 +400,7 @@ public final class HookImpl {
             X509Certificate[] out = new X509Certificate[kb.chain.length + 1];
             out[0] = forgedCert;
             System.arraycopy(kb.chain, 0, out, 1, kb.chain.length);
+            sStatChain.incrementAndGet();
             recordEvent("chain", "forged alg=" + kb.algorithm);
             return out;
         } catch (Throwable t) {
@@ -363,6 +468,7 @@ public final class HookImpl {
             if (alias != null && chainDer != null) {
                 tryKeystoreImport(spi, keyPair, alias, leafDer, chainDer);
             }
+            sStatKeygen.incrementAndGet();
             recordEvent("keygen", "generated alias=" + alias + " alg="
                     + (kmAlgorithm == 3 ? "EC" : "RSA"));
             if (cfg.debug) HookImpl.debug("generated software key for " + alias);
@@ -385,6 +491,7 @@ public final class HookImpl {
 
     private static boolean keyboxApplicable(Config.Snapshot cfg) {
         if (cfg == null || !cfg.enabled || !cfg.keyboxEnabled()) return false;
+        if (Boolean.TRUE.equals(sSelfTest.get())) return true;
         return cfg.isTarget(Config.currentPackage(), currentProcessName());
     }
 
@@ -477,6 +584,7 @@ public final class HookImpl {
             } catch (Throwable ignored) {
             }
             recordEvent("import", "keystore import ok alias=" + alias);
+            sStatImport.incrementAndGet();
             if (Config.get().debug) HookImpl.debug("software key imported into keystore");
         } catch (Throwable t) {
             Config.log("keystore import skipped", t);

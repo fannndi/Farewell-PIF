@@ -75,6 +75,37 @@ Fix: use the real application context (`initContext` cache, then
 `framework.jar` (the bootstrap lives there); afterwards hook updates are sideload-only again.
 Diagnose from the app: `am start ... --es op hookprobe` or `dexprobe`.
 
+## Verification matrix (tools/verify.py)
+
+Run after flashing or after any hook/config change:
+
+```bash
+python tools/verify.py              # full matrix, includes a GMS restart
+python tools/verify.py --skip-gms   # no restart
+python tools/verify.py --json out/verify.json
+```
+
+Checks: `device`, `app`, `config` (en=1), `meta`, `gate`, `dex` (reconstructed sha256),
+`diagnose` (impl loaded + keyboxes healthy), `attest` (live forged chain) and `gms` (logcat shows
+`dex loaded ... pkg=com.google.android.gms`).
+
+App ops used by the tool; results land in logcat with tag `FarewellPIF`:
+
+```bash
+adb shell am start -n dev.farewell.pif/.app.MainActivity --es op selftest   # diagnose + stats
+adb shell am start -n dev.farewell.pif/.app.MainActivity --es op verify     # live attestation test
+adb shell am start -n dev.farewell.pif/.app.MainActivity --es op dexprobe   # dex channel + loader
+adb shell am start -n dev.farewell.pif/.app.MainActivity --es op hookprobe  # bootstrap internals
+```
+
+Bootstrap log lines to watch (`adb logcat -s FarewellPIF`):
+
+```
+I FarewellPIF: dex loaded v=1.8.4 pkg=com.google.android.gms
+I FarewellPIF: gate denied pkg=com.android.settings       # expected outside the gate
+I FarewellPIF: dex hash mismatch pkg=...                  # channel corruption
+```
+
 ## MIUI provisioning (shell cannot write settings)
 
 MIUI removes `WRITE_SECURE_SETTINGS` from the `shell` user, so `adb shell settings put` fails

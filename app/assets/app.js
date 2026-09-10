@@ -446,6 +446,23 @@ function wire() {
     }
   });
 
+  $("btnHookTest").addEventListener("click", () => {
+    try {
+      const result = JSON.parse(fsp.verifyHook());
+      const lines = [];
+      lines.push("ok=" + result.ok + "  forged=" + result.forged
+        + "  chain=" + result.chainLength + "  keygen=" + result.keygen);
+      lines.push("issuer=" + (result.issuer || "-"));
+      if (result.stats) lines.push("stats=" + JSON.stringify(result.stats));
+      if (result.hint) lines.push("hint=" + result.hint);
+      if (result.error) lines.push("error=" + result.error);
+      $("selfTestResult").textContent = lines.join("\n");
+      toast(result.ok ? "Hook live test PASSED" : "Hook live test FAILED — see details");
+    } catch (error) {
+      toast("Hook live test failed: " + error);
+    }
+  });
+
   $("btnCheckRomSignature").addEventListener("click", () => {
     try {
       const result = JSON.parse(fsp.checkRomSignature());

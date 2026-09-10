@@ -141,9 +141,41 @@ public final class FarewellHook {
                 + (sImplClass != null) + "}";
     }
 
+    /**
+     * Bootstrap state as JSON, for the controller app (reflection) and tools/verify.py. Never
+     * triggers a load, so it is safe to call from any process at any time.
+     */
+    public static String state() {
+        try {
+            String gate = readSetting(KEY_GATE);
+            String pkg = currentPackageName();
+            return "{\"impl\":" + (sImplClass != null)
+                    + ",\"failed\":" + sLoadFailed
+                    + ",\"gate\":" + sGateState
+                    + ",\"package\":\"" + (pkg == null ? "" : pkg) + "\""
+                    + ",\"gateValue\":" + (gate == null ? "null" : "\"" + gate + "\"")
+                    + ",\"meta\":" + (sLoadedMeta == null ? "null" : "\"" + sLoadedMeta + "\"")
+                    + "}";
+        } catch (Throwable t) {
+            return "{\"error\":\"" + t + "\"}";
+        }
+    }
+
     public static String getEvents() {
         Object result = invoke("getEvents", new Class<?>[0]);
         return result instanceof String ? (String) result : "[]";
+    }
+
+    /** End-to-end attestation check; see HookImpl.selfTest(). */
+    public static String selfTest() {
+        Object result = invoke("selfTest", new Class<?>[0]);
+        return result instanceof String ? (String) result : "{\"bootstrap\":true,\"impl\":false}";
+    }
+
+    /** Per-process interception counters; see HookImpl.getStats(). */
+    public static String getStats() {
+        Object result = invoke("getStats", new Class<?>[0]);
+        return result instanceof String ? (String) result : "{}";
     }
 
     // ------------------------------------------------------------------ loader
@@ -188,18 +220,24 @@ public final class FarewellHook {
             ByteArrayOutputStream out = new ByteArrayOutputStream();
             for (int i = 0; i < chunks; i++) {
                 String encoded = readSetting(KEY_CHUNK + i);
-                if (encoded == null || encoded.isEmpty()) return null;
+                if (encoded == null || encoded.isEmpty()) {
+                    logOnce("chunk " + i + " unreadable pkg=" + currentPackageName());
+                    return null;
+                }
                 out.write(xor(Base64.decode(encoded, Base64.DEFAULT)));
             }
             byte[] dex = out.toByteArray();
             if (!sha256(dex).equalsIgnoreCase(expectedSha)) {
-                log("runtime dex hash mismatch", null);
+                logOnce("dex hash mismatch pkg=" + currentPackageName());
                 return null;
             }
             dalvik.system.InMemoryDexClassLoader loader =
                     new dalvik.system.InMemoryDexClassLoader(
                             ByteBuffer.wrap(dex), FarewellHook.class.getClassLoader());
-            return Class.forName("dev.farewell.pif.HookImpl", true, loader);
+            Class<?> loaded = Class.forName("dev.farewell.pif.HookImpl", true, loader);
+            String version = parts.length > 2 ? parts[2] : "?";
+            logOnce("dex loaded v=" + version + " pkg=" + currentPackageName());
+            return loaded;
         } catch (Throwable t) {
             log("loadImpl failed", t);
             return null;
@@ -247,14 +285,16 @@ public final class FarewellHook {
         synchronized (FarewellHook.class) {
             if (sGateState != 0) return sGateState == 1;
             boolean allowed = false;
+            String pkg = null;
             try {
                 String gate = readSetting(KEY_GATE);
-                String pkg = currentPackageName();
+                pkg = currentPackageName();
                 allowed = gate != null && !gate.isEmpty() && pkg != null
                         && gate.contains("," + pkg + ",");
             } catch (Throwable ignored) {
             }
             sGateState = allowed ? 1 : 2;
+            if (!allowed) logOnce("gate denied pkg=" + pkg);
             return allowed;
         }
     }
@@ -329,6 +369,17 @@ public final class FarewellHook {
     private static void log(String message, Throwable t) {
         try {
             Log.e(TAG, message, t);
+        } catch (Throwable ignored) {
+        }
+    }
+
+    private static final java.util.Set<String> LOGGED =
+            java.util.Collections.newSetFromMap(
+                    new ConcurrentHashMap<String, Boolean>());
+
+    private static void logOnce(String message) {
+        try {
+            if (LOGGED.add(message)) Log.i(TAG, message);
         } catch (Throwable ignored) {
         }
     }

@@ -34,6 +34,15 @@ system_server secure-flag hooks) **never load the dex** — critical on low-RAM 
 private 570 KB dex per process would create memory pressure and ANRs. The app writes the gate
 when it installs the hook and removes it together with the hook.
 
+## Observability
+
+- The bootstrap logs one line per process: `dex loaded v=<ver> pkg=<pkg>`, or `gate denied pkg=...`
+  outside the allowlist, or `dex hash mismatch pkg=...` when the channel is corrupt.
+- `HookImpl` keeps per-process counters (keygen, chain, keyEntry, property, import) in `getStats()`
+  and a 64-entry event ring in `getEvents()`; `diagnose()` embeds the stats.
+- `tools/verify.py` runs the whole verification matrix over ADB; the app exposes the same checks as
+  the *Framework self-test* and *Hook live test* buttons and in the exported debug bundle.
+
 ## Components
 
 | Path | Role |

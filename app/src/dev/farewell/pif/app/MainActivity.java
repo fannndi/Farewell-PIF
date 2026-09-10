@@ -286,6 +286,12 @@ public class MainActivity extends Activity {
             refresh.invoke(null);
             out.put("afterRefresh", String.valueOf(implField.get(null)));
             out.put("failedAfter", String.valueOf(failedField.get(null)));
+            try {
+                java.lang.reflect.Method stateMethod = hook.getMethod("state");
+                out.put("bootstrapState", String.valueOf(stateMethod.invoke(null)));
+            } catch (Throwable t) {
+                out.put("bootstrapState", "unavailable (old bootstrap)");
+            }
         } catch (Throwable t) {
             try {
                 out.put("error", t.toString());
@@ -353,6 +359,14 @@ public class MainActivity extends Activity {
             } catch (Throwable ignored) {
             }
             return invokeHook("diagnose");
+        }
+        if ("verify".equals(op)) {
+            try {
+                Class<?> hook = Class.forName("dev.farewell.pif.FarewellHook");
+                hook.getMethod("refresh").invoke(null);
+            } catch (Throwable ignored) {
+            }
+            return invokeHook("selfTest");
         }
         if ("dexprobe".equals(op)) {
             return dexProbe();
@@ -555,6 +569,16 @@ public class MainActivity extends Activity {
         }
 
         @JavascriptInterface
+        public String verifyHook() {
+            try {
+                Class<?> hook = Class.forName("dev.farewell.pif.FarewellHook");
+                hook.getMethod("refresh").invoke(null);
+            } catch (Throwable ignored) {
+            }
+            return invokeHook("selfTest");
+        }
+
+        @JavascriptInterface
         public String getEvents() {
             return invokeHook("getEvents");
         }
@@ -606,6 +630,8 @@ public class MainActivity extends Activity {
                 ZipOutputStream zip = new ZipOutputStream(new java.io.FileOutputStream(target));
                 try {
                     putZipEntry(zip, "self-test.json", selfTest());
+                    putZipEntry(zip, "hook-live-test.json", verifyHook());
+                    putZipEntry(zip, "hook-state.json", hookProbe());
                     putZipEntry(zip, "events.json", getEvents());
                     JSONObject redacted = new JSONObject(readConfig().toString());
                     JSONArray keyboxes = redacted.optJSONArray("kb");

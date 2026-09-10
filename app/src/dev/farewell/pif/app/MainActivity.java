@@ -171,10 +171,11 @@ public class MainActivity extends Activity {
         }).start();
     }
 
-    /** ",android,<target packages>," allowlist for the bootstrap (non-targets skip the dex). */
+    /** ",android,self,<target packages>," allowlist for the bootstrap (non-targets skip the dex). */
     private String gateValue(JSONObject config) {
         java.util.LinkedHashSet<String> set = new java.util.LinkedHashSet<String>();
         set.add("android");
+        set.add(getPackageName());
         JSONArray targets = config.optJSONArray("tg");
         if (targets != null) {
             for (int i = 0; i < targets.length(); i++) {
@@ -187,6 +188,111 @@ public class MainActivity extends Activity {
         StringBuilder builder = new StringBuilder(",");
         for (String pkg : set) builder.append(pkg).append(',');
         return builder.toString();
+    }
+
+    /** Replicates the bootstrap dex load to pinpoint failures over ADB (no repack needed). */
+    private String dexProbe() {
+        JSONObject out = new JSONObject();
+        try {
+            String meta = getString(HOOK_META);
+            out.put("meta", meta);
+            if (meta == null || meta.isEmpty()) {
+                out.put("error", "no meta");
+                return out.toString();
+            }
+            String[] parts = meta.split(":");
+            int chunks = Integer.parseInt(parts[1]);
+            out.put("chunks", chunks);
+            java.io.ByteArrayOutputStream buffer = new java.io.ByteArrayOutputStream();
+            for (int i = 0; i < chunks; i++) {
+                String encoded = getString(HOOK_CHUNK + i);
+                if (encoded == null || encoded.isEmpty()) {
+                    out.put("error", "chunk " + i + " missing");
+                    return out.toString();
+                }
+                buffer.write(xor(Base64.decode(encoded, Base64.DEFAULT)));
+            }
+            byte[] dex = buffer.toByteArray();
+            out.put("bytes", dex.length);
+            java.security.MessageDigest digest = java.security.MessageDigest.getInstance("SHA-256");
+            byte[] hash = digest.digest(dex);
+            StringBuilder hex = new StringBuilder();
+            for (byte value : hash) hex.append(String.format("%02x", value));
+            out.put("shaMatch", hex.toString().equalsIgnoreCase(parts[0]));
+            ClassLoader loader = new dalvik.system.InMemoryDexClassLoader(
+                    java.nio.ByteBuffer.wrap(dex), getClassLoader());
+            Class<?> impl = Class.forName("dev.farewell.pif.HookImpl", true, loader);
+            out.put("impl", impl.getName());
+        } catch (Throwable t) {
+            try {
+                out.put("exception", t.toString());
+            } catch (Throwable ignored) {
+            }
+        }
+        return out.toString();
+    }
+
+    /** Reflects into the on-device bootstrap to expose why the impl did not load. */
+    private String hookProbe() {
+        JSONObject out = new JSONObject();
+        try {
+            Class<?> hook = Class.forName("dev.farewell.pif.FarewellHook");
+            java.lang.reflect.Field implField = hook.getDeclaredField("sImplClass");
+            implField.setAccessible(true);
+            java.lang.reflect.Field failedField = hook.getDeclaredField("sLoadFailed");
+            failedField.setAccessible(true);
+            java.lang.reflect.Field metaField = hook.getDeclaredField("sLoadedMeta");
+            metaField.setAccessible(true);
+            out.put("sImplClass", String.valueOf(implField.get(null)));
+            out.put("sLoadFailed", String.valueOf(failedField.get(null)));
+            out.put("sLoadedMeta", String.valueOf(metaField.get(null)));
+            java.lang.reflect.Method read = hook.getDeclaredMethod("readSetting", String.class);
+            read.setAccessible(true);
+            Object meta = read.invoke(null, HOOK_META);
+            out.put("bootstrapMetaLen", meta == null ? -1 : meta.toString().length());
+            Object chunk0 = read.invoke(null, HOOK_CHUNK + 0);
+            out.put("bootstrapChunk0Len", chunk0 == null ? -1 : chunk0.toString().length());
+            java.lang.reflect.Method ctxMethod = hook.getDeclaredMethod("context");
+            ctxMethod.setAccessible(true);
+            Object context = ctxMethod.invoke(null);
+            out.put("context", context == null ? "null" : context.getClass().getName());
+            if (context instanceof android.content.Context) {
+                android.content.Context ctx = (android.content.Context) context;
+                out.put("ctxPackage", ctx.getPackageName());
+                out.put("ctxOpPackage", ctx.getOpPackageName());
+                try {
+                    Object user = ctx.getClass().getMethod("getUserId").invoke(ctx);
+                    out.put("ctxUserId", String.valueOf(user));
+                } catch (Throwable t) {
+                    out.put("ctxUserId", "error:" + t);
+                }
+                try {
+                    String direct = android.provider.Settings.Global.getString(
+                            ctx.getContentResolver(), HOOK_META);
+                    out.put("directReadLen", direct == null ? -1 : direct.length());
+                } catch (Throwable t) {
+                    out.put("directReadError", t.toString());
+                }
+                try {
+                    String viaApp = android.provider.Settings.Global.getString(
+                            getContentResolver(), HOOK_META);
+                    out.put("activityReadLen", viaApp == null ? -1 : viaApp.length());
+                } catch (Throwable t) {
+                    out.put("activityReadError", t.toString());
+                }
+            }
+            java.lang.reflect.Method refresh = hook.getDeclaredMethod("refresh");
+            refresh.setAccessible(true);
+            refresh.invoke(null);
+            out.put("afterRefresh", String.valueOf(implField.get(null)));
+            out.put("failedAfter", String.valueOf(failedField.get(null)));
+        } catch (Throwable t) {
+            try {
+                out.put("error", t.toString());
+            } catch (Throwable ignored) {
+            }
+        }
+        return out.toString();
     }
 
     private static String joinChunks(Intent intent, String prefix) {
@@ -239,6 +345,20 @@ public class MainActivity extends Activity {
         if ("kill_gms".equals(op)) {
             killGms(false);
             return "gms restarted";
+        }
+        if ("selftest".equals(op)) {
+            try {
+                Class<?> hook = Class.forName("dev.farewell.pif.FarewellHook");
+                hook.getMethod("refresh").invoke(null);
+            } catch (Throwable ignored) {
+            }
+            return invokeHook("diagnose");
+        }
+        if ("dexprobe".equals(op)) {
+            return dexProbe();
+        }
+        if ("hookprobe".equals(op)) {
+            return hookProbe();
         }
         return "unknown op";
     }
@@ -884,6 +1004,26 @@ public class MainActivity extends Activity {
             if (chunks > HOOK_MAX_CHUNKS) {
                 return "{\"ok\":false,\"error\":\"hook dex too large\"}";
             }
+            String version = "1";
+            try {
+                version = getPackageManager().getPackageInfo(getPackageName(), 0).versionName;
+            } catch (Throwable ignored) {
+            }
+
+            String current = getString(HOOK_META);
+            if (current != null && current.startsWith(shaHex + ":")
+                    && current.endsWith(":" + version)) {
+                putString(HOOK_GATE, gateValue(readConfig()));
+                JSONObject cached = new JSONObject();
+                cached.put("ok", true);
+                cached.put("cached", true);
+                cached.put("sha", shaHex);
+                cached.put("chunks", chunks);
+                cached.put("version", version);
+                cached.put("size", dex.length);
+                return cached.toString();
+            }
+
             for (int i = 0; i < chunks; i++) {
                 int from = i * HOOK_CHUNK_SIZE;
                 int to = Math.min(dex.length, from + HOOK_CHUNK_SIZE);
@@ -892,11 +1032,6 @@ public class MainActivity extends Activity {
             }
             for (int i = chunks; i < HOOK_MAX_CHUNKS; i++) {
                 deleteKey(HOOK_CHUNK + i);
-            }
-            String version = "1";
-            try {
-                version = getPackageManager().getPackageInfo(getPackageName(), 0).versionName;
-            } catch (Throwable ignored) {
             }
             putString(HOOK_META, shaHex + ":" + chunks + ":" + version);
             putString(HOOK_GATE, gateValue(readConfig()));

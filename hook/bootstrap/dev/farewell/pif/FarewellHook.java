@@ -49,7 +49,10 @@ public final class FarewellHook {
     private static volatile Class<?> sImplClass;
     private static volatile String sLoadedMeta;
     private static volatile boolean sLoadFailed;
+    private static volatile long sLoadFailedAt;
     private static volatile int sGateState; // 0 unknown, 1 allow, 2 deny
+    private static volatile Context sContext;
+    private static final long RETRY_AFTER_MS = 5000L;
     private static final Map<String, Method> sMethods = new ConcurrentHashMap<String, Method>();
 
     private FarewellHook() {
@@ -58,6 +61,7 @@ public final class FarewellHook {
     // ------------------------------------------------------------ entry points
 
     public static void initContext(Context context) {
+        sContext = context;
         refresh();
         invoke("initContext", new Class<?>[]{Context.class}, context);
     }
@@ -166,6 +170,7 @@ public final class FarewellHook {
                     sMethods.clear();
                 } else {
                     sLoadFailed = true;
+                    sLoadFailedAt = System.currentTimeMillis();
                 }
             }
         } catch (Throwable t) {
@@ -207,6 +212,10 @@ public final class FarewellHook {
             Class<?> impl = sImplClass;
             if (impl == null) {
                 if (!sLoadFailed) {
+                    refresh();
+                    impl = sImplClass;
+                } else if (System.currentTimeMillis() - sLoadFailedAt > RETRY_AFTER_MS) {
+                    sLoadFailed = false;
                     refresh();
                     impl = sImplClass;
                 }
@@ -258,17 +267,28 @@ public final class FarewellHook {
         }
     }
 
+    /**
+     * Returns the context used to read Settings.Global.
+     *
+     * In an app process getSystemContext() carries package "android" while the process UID is the
+     * app's, so SettingsProvider rejects every read with "Package android does not belong to &lt;uid&gt;".
+     * Prefer the real application context (set by initContext or currentApplication); the system
+     * context is only correct in system_server, whose UID owns the "android" package.
+     */
     private static Context context() {
+        Context cached = sContext;
+        if (cached != null) return cached;
+        try {
+            Context application = ActivityThread.currentApplication();
+            if (application != null) return application;
+        } catch (Throwable ignored) {
+        }
         try {
             ActivityThread thread = ActivityThread.currentActivityThread();
             if (thread != null) {
                 Context system = thread.getSystemContext();
                 if (system != null) return system;
             }
-        } catch (Throwable ignored) {
-        }
-        try {
-            return ActivityThread.currentApplication();
         } catch (Throwable ignored) {
         }
         return null;

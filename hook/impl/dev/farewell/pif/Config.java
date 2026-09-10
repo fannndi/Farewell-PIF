@@ -101,15 +101,16 @@ final class Config {
         Context c = sContext;
         if (c != null) return c;
         try {
+            Context application = ActivityThread.currentApplication();
+            if (application != null) return application;
+        } catch (Throwable ignored) {
+        }
+        try {
             ActivityThread thread = ActivityThread.currentActivityThread();
             if (thread != null) {
                 Context system = thread.getSystemContext();
                 if (system != null) return system;
             }
-        } catch (Throwable ignored) {
-        }
-        try {
-            return ActivityThread.currentApplication();
         } catch (Throwable ignored) {
         }
         return null;

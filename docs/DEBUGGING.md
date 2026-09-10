@@ -55,6 +55,26 @@ adb logcat -d | grep -E "Attest key send cmd failed|-10003"
   the best-effort keystore import targets the TEE level first — which should succeed because
   plain key generation works.
 
+## App processes never loaded the hook (context bug, fixed in 1.8.3)
+
+The 1.8.0-1.8.2 bootstrap read `Settings.Global` through
+`ActivityThread.getSystemContext()`. That context reports package `android` while the process UID
+is the app's, so SettingsProvider rejects every read:
+
+```
+SecurityException: Package android does not belong to 10148
+```
+
+Result: `readSetting()` returned null in every app process, the dex never loaded, and GMS/Play
+attestation hooks were dead (the chunk writes racing those failed reads also caused the transient
+"runtime dex hash mismatch" and ANR storm). System UID processes (system_server, and MIUI Settings
+when running as uid 1000) were fine, which masked the bug.
+
+Fix: use the real application context (`initContext` cache, then
+`ActivityThread.currentApplication()`, and only then the system context). Requires the 1.8.3
+`framework.jar` (the bootstrap lives there); afterwards hook updates are sideload-only again.
+Diagnose from the app: `am start ... --es op hookprobe` or `dexprobe`.
+
 ## MIUI provisioning (shell cannot write settings)
 
 MIUI removes `WRITE_SECURE_SETTINGS` from the `shell` user, so `adb shell settings put` fails

@@ -32,7 +32,9 @@ The bootstrap also reads the per-process allowlist `sys_perf_dex_pkgs` before lo
 hook dex. Processes whose package is not listed (plus `android`, required for the
 system_server secure-flag hooks) **never load the dex** — critical on low-RAM devices where a
 private 570 KB dex per process would create memory pressure and ANRs. The app writes the gate
-when it installs the hook and removes it together with the hook.
+when it installs the hook and removes it together with the hook. An unreadable gate (settings
+provider not up yet) is never cached, a deny is retried after 5 s, and `initContext`/
+`initSystemServer` respect the gate as well.
 
 ## Observability
 

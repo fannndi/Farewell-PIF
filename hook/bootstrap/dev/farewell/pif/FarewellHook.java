@@ -51,6 +51,7 @@ public final class FarewellHook {
     private static volatile boolean sLoadFailed;
     private static volatile long sLoadFailedAt;
     private static volatile int sGateState; // 0 unknown, 1 allow, 2 deny
+    private static volatile long sGateCheckedAt;
     private static volatile Context sContext;
     private static final long RETRY_AFTER_MS = 5000L;
     private static final Map<String, Method> sMethods = new ConcurrentHashMap<String, Method>();
@@ -62,11 +63,13 @@ public final class FarewellHook {
 
     public static void initContext(Context context) {
         sContext = context;
+        if (!gateAllows()) return;
         refresh();
         invoke("initContext", new Class<?>[]{Context.class}, context);
     }
 
     public static void initSystemServer() {
+        if (!gateAllows()) return;
         refresh();
         invoke("initSystemServer", new Class<?>[0]);
     }
@@ -278,21 +281,39 @@ public final class FarewellHook {
      * Per-process allowlist so non-target processes never load the hook dex. The app writes
      * ",android,com.google.android.gms,com.android.vending," at install time; system_server
      * ("android") is required for the secure-flag hooks.
+     *
+     * The setting may be unreadable early in process start (no context / provider not up), so an
+     * unresolved read is never cached, and a deny is retried after RETRY_AFTER_MS. Without this,
+     * a process that starts before the gate is written would stay disabled until it restarts.
      */
     private static boolean gateAllows() {
+        long now = System.currentTimeMillis();
         int state = sGateState;
-        if (state != 0) return state == 1;
+        if (state == 1) return true;
+        if (sGateCheckedAt != 0 && now - sGateCheckedAt < RETRY_AFTER_MS
+                && (state == 0 || state == 2)) {
+            return false;
+        }
         synchronized (FarewellHook.class) {
-            if (sGateState != 0) return sGateState == 1;
-            boolean allowed = false;
-            String pkg = null;
+            state = sGateState;
+            now = System.currentTimeMillis();
+            if (state == 1) return true;
+            if (sGateCheckedAt != 0 && now - sGateCheckedAt < RETRY_AFTER_MS
+                    && (state == 0 || state == 2)) {
+                return false;
+            }
+            String gate = null;
             try {
-                String gate = readSetting(KEY_GATE);
-                pkg = currentPackageName();
-                allowed = gate != null && !gate.isEmpty() && pkg != null
-                        && gate.contains("," + pkg + ",");
+                gate = readSetting(KEY_GATE);
             } catch (Throwable ignored) {
             }
+            sGateCheckedAt = now;
+            if (gate == null || gate.isEmpty()) {
+                sGateState = 0; // not readable / not installed: retry later
+                return false;
+            }
+            String pkg = currentPackageName();
+            boolean allowed = pkg != null && gate.contains("," + pkg + ",");
             sGateState = allowed ? 1 : 2;
             if (!allowed) logOnce("gate denied pkg=" + pkg);
             return allowed;

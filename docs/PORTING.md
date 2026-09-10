@@ -1,7 +1,12 @@
-# Porting to another device / ROM
+# Porting notes (community, unsupported)
 
-Farewell-PIF is calibrated for **surya / MIUI 14 / Android 12 (SDK 31)**, but the design is
-portable. Anchor calibration tells you in minutes whether your ROM needs changes.
+> **Farewell-PIF targets surya (POCO X3 NFC, MIUI 14 / Android 12) only.** These notes exist so
+> other people can fix/convert the project for their device themselves. Do not expect upstream
+> support; do not change surya behaviour to accommodate another device — add a variant instead.
+
+The smali anchors, register handling and attestation versions are calibrated and verified on
+surya `V14.0.1.0.SJGMIXM` (`out/calibration.json`, `out/patch-report.json`). `patcher/calibrate.py`
+tells you in minutes whether your ROM needs changes.
 
 ## 1. Prepare local tools
 

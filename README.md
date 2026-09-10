@@ -4,8 +4,14 @@
 hot-installable hook dex, and a controller app. No root, no Magisk/KernelSU module, no Zygisk,
 no daemons, no system property writes, no files.
 
-Reference device: **POCO X3 NFC (surya), MIUI 14, Android 12 (SDK 31)**. The patcher is
-anchor-based and reports compatibility for any other ROM — see `docs/PORTING.md`.
+**Supported device: POCO X3 NFC (surya), MIUI 14, Android 12 (SDK 31)** — build
+`V14.0.1.0.SJGMIXM`, keymaster 4.0. Surya compatibility is the priority: the anchors,
+register handling and attestation versions in this repo are calibrated and verified against
+that stock ROM (`out/calibration.json`, `out/patch-report.json`).
+
+Other devices are **not supported out of the box**; `docs/PORTING.md` contains notes so the
+community can fix/convert them, and `patcher/calibrate.py` reports which anchors need
+adjustment. Nothing in the patcher is optimized at the cost of surya.
 
 [![CI](https://github.com/fannndi/Farewell-PIF/actions/workflows/ci.yml/badge.svg)](https://github.com/fannndi/Farewell-PIF/actions/workflows/ci.yml)
 ![license](https://img.shields.io/badge/license-GPL--3.0-blue)

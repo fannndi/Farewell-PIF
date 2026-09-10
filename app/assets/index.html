@@ -1,0 +1,186 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Farewell PIF</title>
+<link rel="stylesheet" href="app.css">
+</head>
+<body>
+<header>
+  <div class="brand">Farewell <span>PIF</span></div>
+  <div id="statusPill" class="pill off">loading</div>
+</header>
+
+<nav id="nav">
+  <button data-tab="home" class="active">Home</button>
+  <button data-tab="integrity">Integrity</button>
+  <button data-tab="target">Target</button>
+  <button data-tab="tools">Tools</button>
+</nav>
+
+<main>
+  <section id="tab-home">
+    <div class="card hero">
+      <div class="hero-row">
+        <div>
+          <div class="hero-title">Play Integrity Fix</div>
+          <div class="hero-sub" id="deviceLine">-</div>
+        </div>
+        <label class="switch">
+          <input type="checkbox" id="enableSwitch">
+          <span class="slider"></span>
+        </label>
+      </div>
+      <div class="chips">
+        <span class="chip" id="chipMode">mode -</span>
+        <span class="chip" id="chipFlags">flags -</span>
+        <span class="chip" id="chipKeybox">keybox -</span>
+        <span class="chip" id="chipTargets">targets -</span>
+      </div>
+    </div>
+
+    <button class="action primary" id="btnQuickFix">FIX INTEGRITY NOW</button>
+    <button class="action" id="btnImportKeyboxHome">Import keybox file</button>
+
+    <div class="grid">
+      <button class="action" id="btnRestart">Restart GMS / DroidGuard</button>
+      <button class="action" id="btnValidateHome">Validate keybox</button>
+      <button class="action" id="btnInstallHookHome">Install / update hook</button>
+      <button class="action" id="btnPatchHome">Refresh security patch</button>
+    </div>
+
+    <div class="card" id="homeResult"></div>
+  </section>
+
+  <section id="tab-integrity" class="hidden">
+    <div class="card">
+      <div class="card-title">Spoofing</div>
+      <label class="row"><span>Properties / Pixel profile</span>
+        <input type="checkbox" class="flag" data-flag="1"></label>
+      <label class="row"><span>Keybox attestation</span>
+        <input type="checkbox" class="flag" data-flag="2"></label>
+      <label class="row"><span>Disable secure flag</span>
+        <input type="checkbox" class="flag" data-flag="4"></label>
+      <label class="row"><span>Platform signature spoof</span>
+        <input type="checkbox" class="flag" data-flag="8"></label>
+      <label class="row"><span>Provider spoof fallback</span>
+        <input type="checkbox" class="flag" data-flag="16"></label>
+      <div class="row">
+        <span>Attestation mode</span>
+        <select id="modeSelect">
+          <option value="auto">Auto (detect TEE)</option>
+          <option value="leaf">Leaf hack</option>
+          <option value="generate">Generate (TEE broken)</option>
+        </select>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">Profile</div>
+      <textarea id="profileText" rows="8" spellcheck="false"></textarea>
+      <div class="grid">
+        <button class="action" id="btnProfileApply">Apply profile</button>
+        <button class="action" id="btnDefaultProfile">Load bundled profile</button>
+        <button class="action" id="btnProfilePatch">Set current patch date</button>
+        <button class="action" id="btnProfileImport">Import profile file</button>
+      </div>
+    </div>
+
+    <div class="card">
+      <div class="card-title">Keyboxes</div>
+      <div id="keyboxList"></div>
+      <div class="grid">
+        <button class="action" id="btnImportKeybox">Import keybox file</button>
+        <button class="action" id="btnValidateKeybox">Validate keybox (offline)</button>
+        <button class="action" id="btnInstallHook">Install / update hook</button>
+        <button class="action" id="btnPhotos">Photos unlimited</button>
+      </div>
+    </div>
+  </section>
+
+  <section id="tab-target" class="hidden">
+    <div class="card">
+      <div class="card-title">Target rules</div>
+      <div id="ruleChips" class="chips"></div>
+      <div class="row">
+        <input type="text" id="ruleInput" placeholder="package or package:process">
+        <button class="mini" id="btnAddRule">Add</button>
+      </div>
+      <div class="row">
+        <span class="muted">Blacklisted rules are prefixed with !</span>
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-title">Installed apps</div>
+      <input type="text" id="appSearch" placeholder="Search apps...">
+      <div id="appList" class="app-list"></div>
+      <button class="action" id="btnSaveTargets">Save targets</button>
+    </div>
+  </section>
+
+  <section id="tab-tools" class="hidden">
+    <div class="card">
+      <div class="card-title">Device</div>
+      <button class="action" id="btnKillGms">Restart GMS / DroidGuard</button>
+      <button class="action" id="btnKillPlay">Restart GMS and kill Play Store background</button>
+      <label class="row"><span>Disable ADB &amp; developer options</span>
+        <input type="checkbox" id="adbToggle"></label>
+      <div class="row">
+        <span>Debug logging</span>
+        <input type="checkbox" id="debugToggle">
+      </div>
+    </div>
+    <div class="card">
+      <div class="card-title">Debugging (USB)</div>
+      <div id="debugState" class="muted"></div>
+      <div class="grid">
+        <button class="action" id="btnEnableAdb">Enable ADB</button>
+        <button class="action" id="btnDisableAdb">Disable ADB</button>
+        <button class="action" id="btnCollectLogs">Collect logcat</button>
+        <button class="action" id="btnExportBundle">Export debug bundle</button>
+      </div>
+      <div class="card-title" style="margin-top:12px">Framework events</div>
+      <div id="eventsList" class="muted" style="white-space:pre-wrap"></div>
+    </div>
+    <div class="card">
+      <div class="card-title">Diagnostics</div>
+      <button class="action" id="btnSelfTest">Framework self-test</button>
+      <button class="action" id="btnCheckRomSignature">Check ROM signature (testkey?)</button>
+      <div id="selfTestResult" class="muted"></div>
+    </div>
+    <div class="card">
+      <div class="card-title">Configuration</div>
+      <div class="grid">
+        <button class="action" id="btnExport">Export config</button>
+        <button class="action" id="btnImport">Import config</button>
+      </div>
+      <textarea id="ioText" rows="7" spellcheck="false"
+        placeholder="Exported configuration appears here; paste one and press Import."></textarea>
+    </div>
+    <div class="card">
+      <div class="card-title">About</div>
+      <p class="muted">Farewell-PIF 1.1.0 — rootless Play Integrity framework for MIUI 14 /
+      Android 12 (surya). Framework hooks live in framework.jar; this app only writes the
+      configuration. No root, no modules, no Zygisk.</p>
+      <p class="muted">Keybox is user supplied. Check its legality in your jurisdiction.
+      Not affiliated with Google.</p>
+    </div>
+  </section>
+</main>
+
+<div id="toast" class="hidden"></div>
+
+<div id="modal" class="hidden">
+  <div class="modal-card">
+    <div class="modal-title" id="modalTitle"></div>
+    <div id="modalBody"></div>
+    <div class="modal-actions">
+      <button class="action" id="modalCancel">Close</button>
+    </div>
+  </div>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>

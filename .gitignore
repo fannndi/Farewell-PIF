@@ -1,0 +1,38 @@
+# build artifacts
+/build/
+/out/
+/dist/
+/work/
+/Module/
+__pycache__/
+*.pyc
+
+# stock ROM dumps and proprietary blobs (never publish)
+/rom/
+
+# third-party tool binaries (fetch locally; see docs/PORTING.md)
+/tools/*
+!/tools/provision.py
+!/tools/audit_rom.py
+!/tools/attestation_lab.py
+!/tools/adb_debug.py
+!/tools/package.py
+
+# reference material: only public data is whitelisted
+/reference/*
+!/reference/profile/
+!/reference/profile/*.json
+!/reference/google/
+!/reference/google/google_attestation_root.pem
+/reference/google/revocation_status.json
+
+# generated assets
+/app/assets/hook.dex
+
+# secrets / private key material
+keybox.xml
+*.keystore
+*.jks
+*.idsig
+*.apk
+!out/.gitkeep

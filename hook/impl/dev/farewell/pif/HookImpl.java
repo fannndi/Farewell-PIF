@@ -375,6 +375,21 @@ public final class HookImpl {
             }
             out.put("keyboxes", keyboxes);
             out.put("stats", new org.json.JSONObject(getStats()));
+            try {
+                Class<?> spi = Class.forName(
+                        "android.security.keystore2.AndroidKeyStoreKeyPairGeneratorSpi");
+                java.lang.reflect.Field aliasField = spi.getDeclaredField("mEntryAlias");
+                aliasField.setAccessible(true);
+                out.put("spiField", "ok");
+            } catch (Throwable t) {
+                out.put("spiField", "error: " + t);
+            }
+            try {
+                out.put("activityThread",
+                        String.valueOf(android.app.ActivityThread.currentPackageName()));
+            } catch (Throwable t) {
+                out.put("activityThread", "error: " + t);
+            }
             return out.toString();
         } catch (Throwable t) {
             return "{\"error\":\"" + t + "\"}";
@@ -646,8 +661,20 @@ public final class HookImpl {
         }
     }
 
+    /**
+     * Field access goes through the bootstrap when available: the impl dex is loaded in-memory and
+     * counts as untrusted for hidden API enforcement, so blacklisted members (mEntryAlias, mSpec,
+     * ...) cannot be reflected on from here. The boot-classpath bridge is exempt.
+     */
     private static Object field(Object target, String name) {
         if (target == null) return null;
+        try {
+            Class<?> hook = Class.forName("dev.farewell.pif.FarewellHook");
+            Object value = hook.getMethod("getField", Object.class, String.class)
+                    .invoke(null, target, name);
+            if (value != null) return value;
+        } catch (Throwable ignored) {
+        }
         Class<?> type = target.getClass();
         while (type != null) {
             try {
@@ -657,6 +684,7 @@ public final class HookImpl {
             } catch (NoSuchFieldException ignored) {
                 type = type.getSuperclass();
             } catch (Throwable t) {
+                Config.logOnce("field " + name + " blocked: " + t);
                 return null;
             }
         }

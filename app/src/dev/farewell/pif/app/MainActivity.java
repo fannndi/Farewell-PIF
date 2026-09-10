@@ -297,6 +297,33 @@ public class MainActivity extends Activity {
         return builder.length() == 0 ? null : builder.toString();
     }
 
+    /**
+     * Reflective refresh + invoke with retries. A freshly started process can be transiently
+     * denied by the bootstrap gate (package name not bound yet), and the decision is cached per
+     * process for a few seconds; retrying makes self-test/verify deterministic.
+     */
+    private String invokeHookLoaded(String method) {
+        String result = null;
+        for (int attempt = 0; attempt < 4; attempt++) {
+            try {
+                Class<?> hook = Class.forName("dev.farewell.pif.FarewellHook");
+                hook.getMethod("refresh").invoke(null);
+            } catch (Throwable ignored) {
+            }
+            result = invokeHook(method);
+            boolean fallback = result == null || result.isEmpty() || result.equals("[]")
+                    || result.contains("\"bootstrap\":true")
+                    || result.contains("\"impl\":false");
+            if (!fallback) return result;
+            try {
+                Thread.sleep(6000);
+            } catch (InterruptedException ignored) {
+                break;
+            }
+        }
+        return result;
+    }
+
     private String runOp(String op, Intent intent) throws Exception {
         if ("remove_hook".equals(op)) {
             removeHook();
@@ -339,20 +366,10 @@ public class MainActivity extends Activity {
             return "gms restarted";
         }
         if ("selftest".equals(op)) {
-            try {
-                Class<?> hook = Class.forName("dev.farewell.pif.FarewellHook");
-                hook.getMethod("refresh").invoke(null);
-            } catch (Throwable ignored) {
-            }
-            return invokeHook("diagnose");
+            return invokeHookLoaded("diagnose");
         }
         if ("verify".equals(op)) {
-            try {
-                Class<?> hook = Class.forName("dev.farewell.pif.FarewellHook");
-                hook.getMethod("refresh").invoke(null);
-            } catch (Throwable ignored) {
-            }
-            return invokeHook("selfTest");
+            return invokeHookLoaded("selfTest");
         }
         if ("dexprobe".equals(op)) {
             return dexProbe();
@@ -492,17 +509,12 @@ public class MainActivity extends Activity {
 
         @JavascriptInterface
         public String selfTest() {
-            return invokeHook("diagnose");
+            return invokeHookLoaded("diagnose");
         }
 
         @JavascriptInterface
         public String verifyHook() {
-            try {
-                Class<?> hook = Class.forName("dev.farewell.pif.FarewellHook");
-                hook.getMethod("refresh").invoke(null);
-            } catch (Throwable ignored) {
-            }
-            return invokeHook("selfTest");
+            return invokeHookLoaded("selfTest");
         }
 
         @JavascriptInterface

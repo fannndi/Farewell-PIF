@@ -181,6 +181,31 @@ public final class FarewellHook {
         return result instanceof String ? (String) result : "{}";
     }
 
+    /**
+     * Reads a private field on behalf of the impl dex.
+     *
+     * Hidden API enforcement evaluates the immediate caller: the impl dex is loaded by
+     * InMemoryDexClassLoader and is treated as untrusted, so reflection on blacklisted members
+     * (e.g. AndroidKeyStoreKeyPairGeneratorSpi.mEntryAlias) throws NoSuchFieldException there.
+     * Calls made from this boot-classpath class are exempt, so the impl routes field access here.
+     */
+    public static Object getField(Object target, String name) {
+        if (target == null || name == null) return null;
+        Class<?> type = target.getClass();
+        while (type != null) {
+            try {
+                java.lang.reflect.Field field = type.getDeclaredField(name);
+                field.setAccessible(true);
+                return field.get(target);
+            } catch (NoSuchFieldException ignored) {
+                type = type.getSuperclass();
+            } catch (Throwable ignored) {
+                return null;
+            }
+        }
+        return null;
+    }
+
     // ------------------------------------------------------------------ loader
 
     /** Re-check the runtime dex version; reload when it changed. */
@@ -313,7 +338,12 @@ public final class FarewellHook {
                 return false;
             }
             String pkg = currentPackageName();
-            boolean allowed = pkg != null && gate.contains("," + pkg + ",");
+            if (pkg == null) {
+                // Very early process start (before ActivityThread binds): never cache, retry.
+                sGateState = 0;
+                return false;
+            }
+            boolean allowed = gate.contains("," + pkg + ",");
             sGateState = allowed ? 1 : 2;
             if (!allowed) logOnce("gate denied pkg=" + pkg);
             return allowed;

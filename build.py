@@ -105,6 +105,7 @@ def compile_hook():
     if target.exists():
         target.unlink()
     impl_dex.rename(target)
+    shutil.copy(target, OUT / "hook.dex")
     print("impl dex: hook.dex (%.1f KB) -> app asset" % (target.stat().st_size / 1024))
 
 

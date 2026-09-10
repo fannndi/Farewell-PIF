@@ -6,6 +6,7 @@
 ┌──────────────────────── Settings.Global (no files, no root) ────────────────────────┐
 │ sys_thermal_profile  = "F1:" + base64(XOR(json))     config envelope                 │
 │ sys_perf_dex_meta    = "<sha256>:<chunks>:<version>" hook dex descriptor             │
+│ sys_perf_dex_pkgs    = ",android,com.google.android.gms,com.android.vending," gate   │
 │ sys_perf_dex_0..N    = base64(XOR(chunk))            hook dex chunks                 │
 └─────────────────────────────────────────────────────────────────────────────────────┘
         ▲ writes (app / provision.py)                 │ reads (every process, 3 s TTL)
@@ -26,6 +27,12 @@
 │  SystemProperties.get/getInt/getLong/getBoolean                                       │
 └─────────────────────────────────────────────────────────────────────────────────────┘
 ```
+
+The bootstrap also reads the per-process allowlist `sys_perf_dex_pkgs` before loading the
+hook dex. Processes whose package is not listed (plus `android`, required for the
+system_server secure-flag hooks) **never load the dex** — critical on low-RAM devices where a
+private 570 KB dex per process would create memory pressure and ANRs. The app writes the gate
+when it installs the hook and removes it together with the hook.
 
 ## Components
 

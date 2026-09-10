@@ -96,7 +96,7 @@ def main():
          "--manifest", str(APP / "AndroidManifest.xml"),
          "-A", str(APP / "assets"),
          "--min-sdk-version", "31", "--target-sdk-version", "31",
-         "--version-code", "9", "--version-name", "1.8.0"])
+         "--version-code", "11", "--version-name", "1.8.2"])
 
     with zipfile.ZipFile(unsigned, "a", zipfile.ZIP_DEFLATED) as apk:
         apk.write(BUILD / "dex" / "classes.dex", "classes.dex")

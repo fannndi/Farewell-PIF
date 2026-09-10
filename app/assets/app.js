@@ -382,6 +382,11 @@ function wire() {
     toast(path.startsWith("export failed") ? path : "Bundle: " + path);
     refreshDebugState();
   });
+  $("btnRemoveHook").addEventListener("click", () => {
+    fsp.removeHookNow();
+    toast("Hook removed — reinstall after enabling");
+    setTimeout(() => { loadState(); refreshDebugState(); }, 800);
+  });
 
   $("btnAddRule").addEventListener("click", () => {
     const value = ($("ruleInput").value || "").trim();

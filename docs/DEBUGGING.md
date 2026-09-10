@@ -55,6 +55,30 @@ adb logcat -d | grep -E "Attest key send cmd failed|-10003"
   the best-effort keystore import targets the TEE level first — which should succeed because
   plain key generation works.
 
+## MIUI provisioning (shell cannot write settings)
+
+MIUI removes `WRITE_SECURE_SETTINGS` from the `shell` user, so `adb shell settings put` fails
+with a SecurityException. Provisioning therefore goes through the privileged app:
+
+```bash
+python tools/provision.py --fix            # config + hook through the app
+python tools/provision.py --keybox keybox.xml
+python tools/provision.py --remove-hook
+```
+
+Direct app ops (used by the tools):
+
+```bash
+adb shell am start -n dev.farewell.pif/.app.MainActivity --es op remove_hook
+# ops: install_hook, remove_hook, set_config (cfg_0.. chunks), set_keybox (kb_0..), kill_gms
+```
+
+**Important:** only install the hook while the config is enabled. With the hook installed but
+`sys_thermal_profile` unset, older builds still loaded the 570 KB dex in every process
+(bootstrap had no gate); since v1.8.2 the bootstrap uses `sys_perf_dex_pkgs` so non-target
+processes never load it. If the device feels slow after flashing, run `--remove-hook` while
+disabled, then enable config + hook together from the app (**FIX INTEGRITY NOW**).
+
 ## Over USB
 
 ```bash

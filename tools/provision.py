@@ -183,6 +183,56 @@ def verify_sideload(dex_path):
         raise SystemExit("sideload round-trip FAILED")
 
 
+def app_installed(adb_bin):
+    out = adb(adb_bin, ["shell", "pm path dev.farewell.pif"], check=False)
+    return "package:" in out
+
+
+def run_app_op(adb_bin, op, extras=None):
+    """MIUI: shell has no WRITE_SECURE_SETTINGS, so settings writes go through the priv-app."""
+    cmd = ["shell", "am", "start", "-n", "dev.farewell.pif/.app.MainActivity",
+           "--es", "op", op]
+    if extras:
+        cmd += extras
+    return adb(adb_bin, cmd, check=False)
+
+
+def chunk_extras(prefix, value, size=6000):
+    extras = []
+    for index in range(0, len(value), size):
+        extras += ["--es", "%s%d" % (prefix, index // size), value[index:index + size]]
+    return extras
+
+
+def push_config(adb_bin, config):
+    payload = json.dumps(config, separators=(",", ":"))
+    if app_installed(adb_bin):
+        run_app_op(adb_bin, "set_config", chunk_extras("cfg_", payload))
+        return
+    settings_put(adb_bin, NEUTRAL_KEY, encode_envelope(config))
+    for legacy in LEGACY_KEYS:
+        settings_delete(adb_bin, legacy)
+
+
+def hook_install(adb_bin, dex_path):
+    if app_installed(adb_bin):
+        run_app_op(adb_bin, "install_hook")
+        print("hook install requested via app")
+        return
+    install_hook(adb_bin, dex_path)
+
+
+def hook_remove(adb_bin):
+    if app_installed(adb_bin):
+        run_app_op(adb_bin, "remove_hook")
+        print("hook removal requested via app")
+        return
+    settings_delete(adb_bin, HOOK_META)
+    for index in range(HOOK_MAX_CHUNKS):
+        settings_delete(adb_bin, HOOK_CHUNK + str(index))
+    print("hook removed")
+
+
 def install_hook(adb_bin, dex_path):
     path = Path(dex_path)
     if not path.exists():
@@ -222,6 +272,8 @@ def main():
     parser.add_argument("--keybox-index", type=int, default=None)
     parser.add_argument("--install-hook", nargs="?", const=str(HOOK_DEX), default=None,
                         help="install the built hook dex into Settings.Global (no repack)")
+    parser.add_argument("--remove-hook", action="store_true",
+                        help="remove the hot-loaded hook (via the app on MIUI)")
     parser.add_argument("--verify-sideload", nargs="?", const=str(HOOK_DEX), default=None,
                         help="local round-trip test of the hook dex chunking (no device)")
     parser.add_argument("--debug", choices=["on", "off"], default=None)
@@ -251,12 +303,14 @@ def main():
         return
 
     if args.clear:
-        settings_delete(adb_bin, NEUTRAL_KEY)
-        for legacy in LEGACY_KEYS:
-            settings_delete(adb_bin, legacy)
-        for index in range(HOOK_MAX_CHUNKS):
-            settings_delete(adb_bin, HOOK_CHUNK + str(index))
-        settings_delete(adb_bin, HOOK_META)
+        if app_installed(adb_bin):
+            push_config(adb_bin, json.loads(json.dumps(DEFAULT_CONFIG)))
+            hook_remove(adb_bin)
+        else:
+            settings_delete(adb_bin, NEUTRAL_KEY)
+            for legacy in LEGACY_KEYS:
+                settings_delete(adb_bin, legacy)
+            hook_remove(adb_bin)
         print("cleared configuration and hook")
         if not args.no_restart:
             force_stop(adb_bin)
@@ -266,9 +320,15 @@ def main():
     changed = False
 
     if args.install_hook is not None:
-        install_hook(adb_bin, args.install_hook)
+        hook_install(adb_bin, args.install_hook)
         if not args.no_restart:
             force_stop(adb_bin)
+
+    if args.remove_hook:
+        hook_remove(adb_bin)
+        if not args.no_restart:
+            force_stop(adb_bin)
+        return
 
     if args.fix:
         if not config.get("pf"):
@@ -313,18 +373,27 @@ def main():
         if args.keybox.startswith("http://") or args.keybox.startswith("https://"):
             raise SystemExit("network fetching is disabled; download the keybox yourself")
         data = Path(args.keybox).read_bytes()
-        _install_keybox(config, data, args.keybox)
+        if app_installed(adb_bin):
+            encoded = base64.b64encode(data).decode("ascii")
+            run_app_op(adb_bin, "set_keybox", chunk_extras("kb_", encoded))
+            print("keybox sent to the app (%d bytes)" % len(data))
+        else:
+            _install_keybox(config, data, args.keybox)
         config["en"] = 1
         if not config.get("fl"):
             config["fl"] = 3
         changed = True
 
     if changed:
-        save_config(adb_bin, config)
+        push_config(adb_bin, config)
+        if config.get("en") == 1 and (args.enable or args.fix or args.keybox):
+            hook_install(adb_bin, str(HOOK_DEX))
+        elif config.get("en") == 0:
+            hook_remove(adb_bin)
         if not args.no_restart:
             force_stop(adb_bin)
         print("done")
-    elif args.install_hook is None:
+    elif args.install_hook is None and not args.remove_hook:
         parser.print_help()
 
 

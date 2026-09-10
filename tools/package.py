@@ -11,7 +11,7 @@ ROOT = Path(__file__).resolve().parent.parent
 OUT = ROOT / "out"
 DIST = ROOT / "dist"
 
-VERSION = "1.8.0"
+VERSION = "1.8.2"
 DEVICE = "surya-a12"
 NAME = "Farewell-PIF-%s-%s.zip" % (VERSION, DEVICE)
 
@@ -39,6 +39,7 @@ def main():
     optional = [
         OUT / "rom-audit.json",
         OUT / "attestation-lab.json",
+        OUT / "hook.dex",
     ]
     present_optional = [path for path in optional if path.exists()]
     with zipfile.ZipFile(target, "w", zipfile.ZIP_DEFLATED) as archive:

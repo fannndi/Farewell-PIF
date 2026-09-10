@@ -57,6 +57,7 @@ public class MainActivity extends Activity {
     private static final String KEY = "sys_thermal_profile";
     private static final String HOOK_META = "sys_perf_dex_meta";
     private static final String HOOK_CHUNK = "sys_perf_dex_";
+    private static final String HOOK_GATE = "sys_perf_dex_pkgs";
     private static final int HOOK_MAX_CHUNKS = 32;
     private static final int HOOK_CHUNK_SIZE = 140 * 1024;
 
@@ -122,14 +123,124 @@ public class MainActivity extends Activity {
             @Override
             public void run() {
                 try {
-                    JSONObject result = new JSONObject(installHook());
-                    if (!result.optBoolean("ok", false)) {
-                        // silent: the dashboard shows the hook state
+                    // Only load the hook in every process when the feature is actually enabled.
+                    if (readConfig().optInt("en", 0) == 1) {
+                        installHook();
                     }
                 } catch (Throwable ignored) {
                 }
             }
         }).start();
+        handleIntentOps(getIntent());
+    }
+
+    @Override
+    protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        setIntent(intent);
+        handleIntentOps(intent);
+    }
+
+    /**
+     * Provisioning entry point for ADB on ROMs whose shell lacks WRITE_SECURE_SETTINGS (MIUI):
+     *   adb shell am start -n dev.farewell.pif/.app.MainActivity --es op remove_hook
+     *   adb shell am start -n dev.farewell.pif/.app.MainActivity --es op set_config --es json '{...}'
+     */
+    private void handleIntentOps(final Intent intent) {
+        if (intent == null) return;
+        final String op = intent.getStringExtra("op");
+        if (op == null || op.isEmpty()) return;
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                String result;
+                try {
+                    result = runOp(op, intent);
+                } catch (Throwable t) {
+                    result = "error: " + t;
+                }
+                android.util.Log.i("FarewellPIF", "op " + op + " -> " + result);
+                handler.post(new Runnable() {
+                    @Override
+                    public void run() {
+                        toast("op done: see logcat");
+                        finish();
+                    }
+                });
+            }
+        }).start();
+    }
+
+    /** ",android,<target packages>," allowlist for the bootstrap (non-targets skip the dex). */
+    private String gateValue(JSONObject config) {
+        java.util.LinkedHashSet<String> set = new java.util.LinkedHashSet<String>();
+        set.add("android");
+        JSONArray targets = config.optJSONArray("tg");
+        if (targets != null) {
+            for (int i = 0; i < targets.length(); i++) {
+                String rule = targets.optString(i, "");
+                if (rule.isEmpty()) continue;
+                String pkg = rule.contains(":") ? rule.substring(0, rule.indexOf(':')) : rule;
+                if (!pkg.endsWith("*")) set.add(pkg);
+            }
+        }
+        StringBuilder builder = new StringBuilder(",");
+        for (String pkg : set) builder.append(pkg).append(',');
+        return builder.toString();
+    }
+
+    private static String joinChunks(Intent intent, String prefix) {
+        StringBuilder builder = new StringBuilder();
+        for (int i = 0; i < 32; i++) {
+            String part = intent.getStringExtra(prefix + i);
+            if (part == null) break;
+            builder.append(part);
+        }
+        return builder.length() == 0 ? null : builder.toString();
+    }
+
+    private String runOp(String op, Intent intent) throws Exception {
+        if ("remove_hook".equals(op)) {
+            removeHook();
+            return "hook removed";
+        }
+        if ("install_hook".equals(op)) {
+            if (readConfig().optInt("en", 0) != 1) return "refused: config disabled";
+            return installHook();
+        }
+        if ("set_config".equals(op)) {
+            String json = intent.getStringExtra("json");
+            if (json == null || json.isEmpty()) json = joinChunks(intent, "cfg_");
+            if (json == null || json.isEmpty()) return "missing json";
+            JSONObject config = new JSONObject(json);
+            sanitize(config);
+            writeConfig(config);
+            return "config written";
+        }
+        if ("set_keybox".equals(op)) {
+            String base64 = intent.getStringExtra("b64xml");
+            if (base64 == null || base64.isEmpty()) base64 = joinChunks(intent, "kb_");
+            if (base64 == null || base64.isEmpty()) return "missing b64xml";
+            JSONObject info = inspectKeybox(base64);
+            if (!info.optBoolean("valid", false)) return "invalid keybox";
+            JSONObject config = readConfig();
+            JSONArray keyboxes = new JSONArray();
+            keyboxes.put(base64);
+            JSONArray existing = config.optJSONArray("kb");
+            if (existing != null) {
+                for (int i = 0; i < existing.length() && i < 3; i++) {
+                    keyboxes.put(existing.optString(i, ""));
+                }
+            }
+            config.put("kb", dedupe(keyboxes));
+            writeConfig(config);
+            return "keybox installed";
+        }
+        if ("kill_gms".equals(op)) {
+            killGms(false);
+            return "gms restarted";
+        }
+        return "unknown op";
     }
 
     private ValueCallback<Uri[]> getFileCallback() {
@@ -426,6 +537,12 @@ public class MainActivity extends Activity {
         }
 
         @JavascriptInterface
+        public String removeHookNow() {
+            removeHook();
+            return "{\"ok\":true}";
+        }
+
+        @JavascriptInterface
         public void runTask(String task, String arg) {
             final String name = task == null ? "" : task;
             final String value = arg == null ? "" : arg;
@@ -470,6 +587,9 @@ public class MainActivity extends Activity {
             importKeybox(arg);
         } else if ("install_hook".equals(task)) {
             callback(task, installHook());
+        } else if ("remove_hook".equals(task)) {
+            removeHook();
+            callback(task, "{\"ok\":true}");
         }
     }
 
@@ -740,6 +860,16 @@ public class MainActivity extends Activity {
         }
     }
 
+    /** Removes the hot-loaded hook so no process pays the dex load cost while disabled. */
+    private void removeHook() {
+        deleteKey(HOOK_META);
+        deleteKey(HOOK_GATE);
+        for (int i = 0; i < HOOK_MAX_CHUNKS; i++) {
+            deleteKey(HOOK_CHUNK + i);
+        }
+        killGms(false);
+    }
+
     /** Writes the bundled hook dex into Settings.Global for the bootstrap to hot-load. */
     private String installHook() {
         try {
@@ -769,6 +899,7 @@ public class MainActivity extends Activity {
             } catch (Throwable ignored) {
             }
             putString(HOOK_META, shaHex + ":" + chunks + ":" + version);
+            putString(HOOK_GATE, gateValue(readConfig()));
             killGms(false);
 
             JSONObject out = new JSONObject();

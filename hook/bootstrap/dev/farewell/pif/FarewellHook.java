@@ -37,6 +37,7 @@ public final class FarewellHook {
 
     private static final String KEY_META = "sys_perf_dex_meta";
     private static final String KEY_CHUNK = "sys_perf_dex_";
+    private static final String KEY_GATE = "sys_perf_dex_pkgs";
     private static final int MAX_CHUNKS = 32;
     private static final byte[] XOR_KEY = {
             0x46, 0x61, 0x72, 0x65, 0x77, 0x65, 0x6C, 0x6C,
@@ -48,6 +49,7 @@ public final class FarewellHook {
     private static volatile Class<?> sImplClass;
     private static volatile String sLoadedMeta;
     private static volatile boolean sLoadFailed;
+    private static volatile int sGateState; // 0 unknown, 1 allow, 2 deny
     private static final Map<String, Method> sMethods = new ConcurrentHashMap<String, Method>();
 
     private FarewellHook() {
@@ -201,6 +203,7 @@ public final class FarewellHook {
 
     private static Object invoke(String name, Class<?>[] types, Object... args) {
         try {
+            if (!gateAllows()) return null;
             Class<?> impl = sImplClass;
             if (impl == null) {
                 if (!sLoadFailed) {
@@ -223,6 +226,37 @@ public final class FarewellHook {
     }
 
     // ------------------------------------------------------------------ helpers
+
+    /**
+     * Per-process allowlist so non-target processes never load the hook dex. The app writes
+     * ",android,com.google.android.gms,com.android.vending," at install time; system_server
+     * ("android") is required for the secure-flag hooks.
+     */
+    private static boolean gateAllows() {
+        int state = sGateState;
+        if (state != 0) return state == 1;
+        synchronized (FarewellHook.class) {
+            if (sGateState != 0) return sGateState == 1;
+            boolean allowed = false;
+            try {
+                String gate = readSetting(KEY_GATE);
+                String pkg = currentPackageName();
+                allowed = gate != null && !gate.isEmpty() && pkg != null
+                        && gate.contains("," + pkg + ",");
+            } catch (Throwable ignored) {
+            }
+            sGateState = allowed ? 1 : 2;
+            return allowed;
+        }
+    }
+
+    private static String currentPackageName() {
+        try {
+            return ActivityThread.currentPackageName();
+        } catch (Throwable t) {
+            return null;
+        }
+    }
 
     private static Context context() {
         try {

@@ -31,6 +31,7 @@ public final class HookImpl {
     private static final ConcurrentHashMap<String, Generated> sGenerated =
             new ConcurrentHashMap<String, Generated>();
     private static volatile int sTeeState; // 0 unknown, 1 works, 2 broken
+    private static final ThreadLocal<Boolean> sProbeActive = new ThreadLocal<Boolean>();
     private static final java.util.ArrayDeque<String> sEvents =
             new java.util.ArrayDeque<String>();
     private static final int MAX_EVENTS = 64;
@@ -315,6 +316,11 @@ public final class HookImpl {
             Config.Snapshot cfg = Config.get();
             if (!cfg.enabled || !cfg.keyboxEnabled()) return null;
             if (!keyboxApplicable(cfg)) return null;
+            if (Boolean.TRUE.equals(sProbeActive.get())) {
+                // Inside the TEE probe: bypass the hook so the genuine keystore path runs and the
+                // probe measures real hardware behaviour (including attestation refusal).
+                return null;
+            }
             String packageName = Config.currentPackage();
             int mode = cfg.modeFor(packageName);
             if (mode == Config.MODE_LEAF) {
@@ -478,12 +484,14 @@ public final class HookImpl {
     }
 
     private static boolean teeWorks() {
+        if (Boolean.TRUE.equals(sProbeActive.get())) return true;
         int state = sTeeState;
         if (state != 0) return state == 1;
         synchronized (HookImpl.class) {
             if (sTeeState != 0) return sTeeState == 1;
             boolean works = false;
             String alias = "farewell_probe_" + Process.myPid();
+            sProbeActive.set(Boolean.TRUE);
             try {
                 KeyPairGenerator generator = KeyPairGenerator.getInstance("EC", "AndroidKeyStore");
                 KeyGenParameterSpec spec = new KeyGenParameterSpec.Builder(
@@ -495,6 +503,8 @@ public final class HookImpl {
                 works = keyPair != null && keyPair.getPrivate() != null;
             } catch (Throwable t) {
                 works = false;
+            } finally {
+                sProbeActive.remove();
             }
             try {
                 KeyStore keyStore = KeyStore.getInstance("AndroidKeyStore");
@@ -503,6 +513,7 @@ public final class HookImpl {
             } catch (Throwable ignored) {
             }
             sTeeState = works ? 1 : 2;
+            recordEvent("teeProbe", works ? "works" : "broken");
             return works;
         }
     }

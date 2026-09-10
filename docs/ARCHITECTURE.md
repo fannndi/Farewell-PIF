@@ -69,7 +69,19 @@
 ## Stealth choices
 
 - No root, module, Zygisk, daemon, `resetprop`, or files anywhere.
+- **No native libraries by design.** Kaorios ships `libkousei.so`, but our hook is pure
+  Java + BouncyCastle, so nothing has to be loaded into target processes. A `.so` would only
+  help for a root/Zygisk module (native property hooks) — explicitly out of scope.
 - One neutral settings key + `F1:` XOR envelope instead of many suspicious keys.
 - Targets default to the DroidGuard process + Play Store only (per-process matching).
 - Keybox parsing rejects DTD/entities and caps input sizes.
 - Hooks are silent by default; debug logging is opt-in.
+
+## TEE probe (surya reality)
+
+`mode=auto` probes the TEE with an attested EC key. The probe temporarily bypasses the hook
+(`sProbeActive`) so it measures the genuine keystore path, and it is guarded against
+re-entering `generateKeyPair`. On surya the probe fails — Qualcomm refuses attest-key
+generation (`resp->status: -10003`) while plain key generation succeeds — so the hook selects
+**generate** mode (software key + keybox chain). See `docs/DEBUGGING.md` for the on-device
+proof and repro commands.

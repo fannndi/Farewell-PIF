@@ -38,6 +38,23 @@ adb shell md5sum /system/framework/framework.jar   # compare with stock/patched 
   Play Store → profile → Settings → About → *Play Protect certification*, or run a Play
   Integrity checker after installing the patched framework.
 
+### Attestation status on surya (verified on device)
+
+This device's TEE **refuses attestation** while plain key generation still works:
+
+```bash
+adb shell keystore_cli_v2 generate --name=probe --seclevel=tee   # GenerateKey: success
+adb shell keystore_cli_v2 delete --name=probe
+adb logcat -d | grep -E "Attest key send cmd failed|-10003"
+# KeyMasterHalDevice: Attest key send cmd failed
+# KeyMasterHalDevice: resp->status: -10003   (from DroidGuard key requests)
+```
+
+- keystore2 offers only `tee`/`strongbox` (no software level) on this ROM.
+- Therefore `mode=auto` correctly falls back to **generate** (software key + keybox chain), and
+  the best-effort keystore import targets the TEE level first — which should succeed because
+  plain key generation works.
+
 ## Over USB
 
 ```bash

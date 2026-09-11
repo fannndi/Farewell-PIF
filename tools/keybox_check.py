@@ -143,6 +143,7 @@ def fetch_online_roots():
         from urllib.request import urlopen
         blob = urlopen("https://android.googleapis.com/attestation/root",
                        timeout=15).read().decode()
+        blob = blob.replace("\\n", "\n")
         pems = re.findall(r"-----BEGIN CERTIFICATE-----(.*?)-----END CERTIFICATE-----",
                           blob, re.S)
         roots = {}

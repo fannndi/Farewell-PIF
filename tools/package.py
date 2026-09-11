@@ -40,6 +40,7 @@ def main():
         OUT / "rom-audit.json",
         OUT / "attestation-lab.json",
         OUT / "hook.dex",
+        ROOT / "build" / "native" / "libfarewell.so",
     ]
     present_optional = [path for path in optional if path.exists()]
     with zipfile.ZipFile(target, "w", zipfile.ZIP_DEFLATED) as archive:

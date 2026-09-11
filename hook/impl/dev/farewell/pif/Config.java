@@ -548,6 +548,7 @@ final class Config {
             }
             if (key.endsWith(".build.id")) return profileString("ID");
             if (key.endsWith(".api_level")) return profileString("DEVICE_INITIAL_SDK_INT");
+            if (key.endsWith("first_api_level")) return profileString("DEVICE_INITIAL_SDK_INT");
             switch (key) {
                 case "ro.build.fingerprint":
                 case "ro.bootimage.build.fingerprint":

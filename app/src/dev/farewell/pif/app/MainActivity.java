@@ -378,6 +378,9 @@ public class MainActivity extends Activity {
         if ("hookprobe".equals(op)) {
             return hookProbe();
         }
+        if ("nativeprobe".equals(op)) {
+            return nativeProbeTest();
+        }
         return "unknown op";
     }
 
@@ -1032,6 +1035,31 @@ public class MainActivity extends Activity {
         } catch (Throwable ignored) {
         }
     }
+
+    /** Native property hook probe: loads the library from the app's files dir and verifies it. */
+    private String nativeProbeTest() {
+        JSONObject out = new JSONObject();
+        try {
+            java.io.File lib = new java.io.File(getFilesDir(), "libfarewell.so");
+            java.io.InputStream in = getAssets().open("libfarewell.so");
+            java.io.FileOutputStream fileOut = new java.io.FileOutputStream(lib);
+            byte[] buffer = new byte[8192];
+            int read;
+            while ((read = in.read(buffer)) > 0) fileOut.write(buffer, 0, read);
+            fileOut.close();
+            in.close();
+            System.load(lib.getAbsolutePath());
+            out.put("native", nativeProbe());
+        } catch (Throwable t) {
+            try {
+                out.put("error", t.toString());
+            } catch (Throwable ignored) {
+            }
+        }
+        return out.toString();
+    }
+
+    private native String nativeProbe();
 
     private String invokeHook(String method) {
         try {

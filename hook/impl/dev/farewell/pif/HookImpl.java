@@ -244,6 +244,7 @@ public final class HookImpl {
             if (!sPropsApplied.compareAndSet(false, true)) return;
             Props.applyBuildFields(cfg.profileFor(pkg));
             if (cfg.signatureSpoof()) Props.installSignatureSpoof();
+            NativeProps.enableFrom(cfg);
             if (cfg.debug) debug("props applied " + pkg + ":" + process);
         } catch (Throwable t) {
             sPropsApplied.set(false);

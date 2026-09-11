@@ -45,6 +45,20 @@ provider not up yet) is never cached, a deny is retried after 5 s, and `initCont
 - `tools/verify.py` runs the whole verification matrix over ADB; the app exposes the same checks as
   the *Framework self-test* and *Hook live test* buttons and in the exported debug bundle.
 
+## Native layer ("internal zygisk", no root)
+
+Java hooks cannot reach native readers (DroidGuard's VM, libc `__system_property_get`), which is
+why upstream solutions spoof properties with Zygisk. Rootless equivalent:
+
+- `native/farewell.c` builds `libfarewell.so` (arm64) with the NDK. It inline-hooks libc's
+  `__system_property_get` (16-byte absolute branch + trampoline, refuses to patch a PC-relative
+  prologue) and serves a key/value table installed from Java.
+- The library ships to `/system/lib64/libfarewell.so` in the repack. The boot-classpath hook loads
+  it lazily in props targets (`NativeProps.enableFrom`), so DroidGuard's native property reads see
+  the same spoofed identity as the Java layer (fingerprint, boot state, patch levels).
+- If the library is missing or the hook fails, nothing changes: the Java spoof alone keeps
+  working. Probe with `am start ... --es op nativeprobe`.
+
 ## Audited conventions
 
 - **Vending stays attestation-only on Android 12L and below.** Spoofing the Play Store

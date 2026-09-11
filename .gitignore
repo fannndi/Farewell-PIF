@@ -29,6 +29,7 @@ __pycache__/
 
 # generated assets
 /app/assets/hook.dex
+/app/assets/libfarewell.so
 
 # secrets / private key material
 keybox.xml

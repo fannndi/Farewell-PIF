@@ -57,6 +57,34 @@ static int farewell_get(const char *name, char *value) {
     return 0;
 }
 
+// __system_property_read_callback(pi, callback, cookie) with callback(cookie, name, value, serial)
+typedef void (*prop_cb_t)(void *, const char *, const char *, uint32_t);
+typedef void (*prop_read_cb_t)(const void *, prop_cb_t, void *);
+static prop_read_cb_t g_orig_read_cb = NULL;
+
+struct cb_ctx {
+    prop_cb_t user;
+    void *cookie;
+};
+
+static void farewell_cb_thunk(void *cookie, const char *name, const char *value,
+                              uint32_t serial) {
+    struct cb_ctx *ctx = (struct cb_ctx *) cookie;
+    const char *spoofed = lookup(name);
+    ctx->user(ctx->cookie, name, spoofed != NULL ? spoofed : value, serial);
+}
+
+static void farewell_read_callback(const void *pi, prop_cb_t callback, void *cookie) {
+    if (callback == NULL) {
+        if (g_orig_read_cb != NULL) g_orig_read_cb(pi, NULL, cookie);
+        return;
+    }
+    struct cb_ctx ctx;
+    ctx.user = callback;
+    ctx.cookie = cookie;
+    if (g_orig_read_cb != NULL) g_orig_read_cb(pi, farewell_cb_thunk, &ctx);
+}
+
 static int is_pc_relative(uint32_t insn) {
     // ADR/ADRP and literal loads would break when relocated into the trampoline.
     if ((insn & 0x9F000000) == 0x10000000) return 1; // ADR / ADRP
@@ -101,6 +129,41 @@ static void install_hook(void *target) {
     LOGI("__system_property_get hooked");
 }
 
+// Same 16-byte trick, single trampoline: only used for read_callback.
+static uint8_t g_tramp_cb[32] __attribute__((aligned(16)));
+
+static void install_hook_cb(void *target) {
+    uint8_t *code = (uint8_t *) target;
+    uintptr_t page = (uintptr_t) code & ~(uintptr_t) (PAGE_SIZE - 1);
+    if (mprotect((void *) page, PAGE_SIZE * 2,
+                 PROT_READ | PROT_WRITE | PROT_EXEC) != 0) {
+        return;
+    }
+    uint32_t first[4];
+    memcpy(first, code, sizeof(first));
+    for (int i = 0; i < 4; i++) {
+        if (is_pc_relative(first[i])) {
+            LOGE("read_callback prologue PC-relative, skipping");
+            mprotect((void *) page, PAGE_SIZE * 2, PROT_READ | PROT_EXEC);
+            return;
+        }
+    }
+    memcpy(g_tramp_cb, code, 16);
+    uint32_t *t = (uint32_t *) (g_tramp_cb + 16);
+    t[0] = 0x58000051;
+    t[1] = 0xD61F0220;
+    *(uint64_t *) (g_tramp_cb + 24) = (uint64_t) (code + 16);
+    g_orig_read_cb = (prop_read_cb_t) g_tramp_cb;
+
+    uint32_t patch[2];
+    patch[0] = 0x58000051;
+    patch[1] = 0xD61F0220;
+    memcpy(code, patch, sizeof(patch));
+    *(uint64_t *) (code + 8) = (uint64_t) &farewell_read_callback;
+    __builtin___clear_cache((char *) code, (char *) code + 16);
+    LOGI("__system_property_read_callback hooked");
+}
+
 JNIEXPORT jint JNICALL
 Java_dev_farewell_pif_NativeProps_enable(JNIEnv *env, jclass clazz,
                                          jobjectArray keys, jobjectArray values) {
@@ -137,6 +200,12 @@ Java_dev_farewell_pif_NativeProps_enable(JNIEnv *env, jclass clazz,
         return 2;
     }
     install_hook(target);
+    void *read_cb = dlsym(RTLD_DEFAULT, "__system_property_read_callback");
+    if (read_cb == NULL) {
+        void *libc = dlopen("libc.so", RTLD_NOW);
+        if (libc != NULL) read_cb = dlsym(libc, "__system_property_read_callback");
+    }
+    if (read_cb != NULL) install_hook_cb(read_cb);
     if (g_ready != 1) g_ready = 2;
     LOGI("native props enabled: %d entries, state=%d", g_count, g_ready);
     return g_ready;

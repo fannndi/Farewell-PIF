@@ -77,7 +77,8 @@ public class MainActivity extends Activity {
     private static final String DEFAULT_CONFIG =
             "{\"v\":1,\"en\":0,\"fl\":3,\"md\":\"auto\",\"dbg\":0,"
             + "\"pf\":{},\"tg\":[\"com.google.android.gms:com.google.android.gms.unstable\","
-            + "\"com.android.vending\"],\"nb\":[],\"kb\":[],\"kbi\":-1,\"ft\":{},\"ap\":{}}";
+            + "\"com.google.android.gms\",\"com.google.android.gsf\",\"com.android.vending\"],"
+            + "\"nb\":[],\"kb\":[],\"kbi\":-1,\"ft\":{},\"ap\":{}}";
 
     private final Handler handler = new Handler(Looper.getMainLooper());
     private WebView webView;

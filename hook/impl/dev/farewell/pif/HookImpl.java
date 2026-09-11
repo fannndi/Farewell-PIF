@@ -594,7 +594,7 @@ public final class HookImpl {
     private static boolean keyboxApplicable(Config.Snapshot cfg) {
         if (cfg == null || !cfg.enabled || !cfg.keyboxEnabled()) return false;
         if (Boolean.TRUE.equals(sSelfTest.get())) return true;
-        return cfg.isTarget(Config.currentPackage(), currentProcessName());
+        return cfg.attestationFor(Config.currentPackage(), currentProcessName());
     }
 
     private static byte[] chainBytes(java.security.cert.Certificate[] chain) {

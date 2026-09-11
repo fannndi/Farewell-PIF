@@ -392,6 +392,19 @@ final class Config {
         }
 
         /**
+         * Keybox attestation follows TEESimulator's target.txt idea: the whole Google stack gets
+         * the simulated chain (GMS main included - Play certification involves it), while Build
+         * spoofing stays limited to propsFor() (PIF targets only, never GMS main / Vending).
+         */
+        boolean attestationFor(String pkg, String process) {
+            if (isTarget(pkg, process)) return true;
+            if (pkg == null) return false;
+            return pkg.equals("com.google.android.gms") || pkg.startsWith("com.google.android.gms")
+                    || pkg.equals("com.google.android.gsf")
+                    || pkg.equals("com.android.vending");
+        }
+
+        /**
          * Whether Build/property spoofing applies to this process.
          *
          * Default (PIF-compatible): only the configured targets; Play Store keeps its real

@@ -8,18 +8,35 @@ import org.json.JSONObject;
 
 import java.io.ByteArrayInputStream;
 import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 import java.security.cert.CertificateFactory;
 import java.security.cert.X509Certificate;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 import javax.xml.parsers.DocumentBuilderFactory;
 
 import org.w3c.dom.Document;
 import org.w3c.dom.NodeList;
 
-/** Keybox module: parsing/validation of the XML and installation into the config channel. */
+/** Keybox module: XML parsing/validation and installation into the config channel. */
 final class Keyboxes {
+    /**
+     * Google's CURRENT hardware attestation roots (android.googleapis.com/attestation/root),
+     * pinned offline. A chain that terminates anywhere else is locally valid but rejected
+     * server-side; see tools/keybox_check.py and docs/DETECTION.md.
+     */
+    private static final Map<String, String> CURRENT_ROOTS = new HashMap<String, String>();
+
+    static {
+        CURRENT_ROOTS.put("cedb1cb6dc896ae5ec797348bce9286753c2b38ee71ce0fbe34a9a1248800dfc",
+                "RSA-4096 (2022)");
+        CURRENT_ROOTS.put("6d9db4ce6c5c0b293166d08986e05774a8776ceb525d9e4329520de12ba4bcc0",
+                "ECDSA P-384 CA1 (2025)");
+    }
+
     private Keyboxes() {
     }
 
@@ -73,6 +90,18 @@ final class Keyboxes {
             chain.get(0).verify(chain.get(1).getPublicKey());
             result.put("valid", true);
             result.put("error", "");
+
+            X509Certificate root = chain.get(chain.size() - 1);
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            byte[] hash = digest.digest(root.getEncoded());
+            StringBuilder hex = new StringBuilder();
+            for (byte value : hash) hex.append(String.format("%02x", value));
+            String rootFp = hex.toString();
+            String rootName = CURRENT_ROOTS.get(rootFp);
+            result.put("rootFp", rootFp);
+            result.put("anchored", rootName != null);
+            result.put("rootName", rootName != null ? rootName
+                    : "retired/unknown root - STRONG cannot pass");
         } catch (Throwable t) {
             try {
                 result.put("valid", false);
@@ -81,6 +110,11 @@ final class Keyboxes {
             }
         }
         return result;
+    }
+
+    /** True when this SHA-256 fingerprint is one of Google's current attestation roots. */
+    static boolean isCurrentRoot(String fingerprint) {
+        return fingerprint != null && CURRENT_ROOTS.containsKey(fingerprint);
     }
 
     /** Validates and prepends a keybox to the config channel; returns its serial. */

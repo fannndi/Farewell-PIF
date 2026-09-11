@@ -1,4 +1,4 @@
-/* Farewell-PIF controller UI — two things: fingerprint profile + keybox. */
+/* Farewell-PIF controller UI — fingerprint profile + optional keybox, with a PIF-Detector style audit. */
 "use strict";
 
 let config = null;
@@ -77,10 +77,11 @@ function render(state) {
     primary.className = "primary import";
   } else if (enabled && hook.installed) {
     $("heroState").textContent = "✅";
-    $("heroText").textContent = (flags & 2) ? "Protected" : "Profile active";
-    $("heroSub").textContent = (flags & 2)
-      ? validBoxes.length + " keybox valid · " + (profile.MODEL || "profile")
-      : "PIF profile mode (no keybox attestation)";
+    const anchored = (state.keyboxes || []).some((box) => box.valid && box.anchored);
+    $("heroText").textContent = (flags & 2) && anchored ? "Protected" : "Profile active";
+    $("heroSub").textContent = (flags & 2) && anchored
+      ? validBoxes.length + " keybox anchored · " + (profile.MODEL || "profile")
+      : "PIF profile only (no keybox attestation)";
     primary.textContent = "RE-APPLY";
     primary.className = "primary";
   } else {
@@ -101,6 +102,10 @@ function render(state) {
   $("kbState").textContent = keyboxes.length
     ? (validBoxes.length + "/" + keyboxes.length + " valid") : "none";
   $("kbSerial").textContent = first && first.serial ? first.serial : "-";
+  $("kbRoot").textContent = first
+    ? (first.valid ? (first.anchored ? "current (" + (first.rootName || "Google") + ")"
+      : "retired/unknown — STRONG rejected") : "invalid")
+    : "-";
   $("keyboxToggle").checked = (flags & 2) !== 0;
 }
 
@@ -113,11 +118,28 @@ window.__cb = function (event, dataJson) {
   if (event === "quick_fix") {
     if (data.progress) { toast(data.progress); return; }
     if (data.ok) {
-      toast(data.keybox ? "Applied — keybox attestation on"
+      toast(data.keyboxWarning ? "Applied — " + data.keyboxWarning
+        : data.keybox ? "Applied — keybox attestation on"
         : "Applied — PIF profile mode (no keybox)");
       loadState();
     } else {
       toast("Apply failed: " + (data.error || "unknown"));
+    }
+    return;
+  }
+  if (event === "audit") {
+    if (data.lines) showDiag(data.lines.join("\n"));
+    else showDiag(JSON.stringify(data, null, 2));
+    toast(data.verdict === "PASS" ? "Security audit: PASS"
+      : "Security audit: " + (data.verdict || "see output"));
+    return;
+  }
+  if (event === "update_profile") {
+    if (data.ok) {
+      toast("Profile updated: " + (data.model || data.fingerprint));
+      loadState();
+    } else {
+      toast("Update failed: " + (data.error || "unknown"));
     }
     return;
   }
@@ -181,6 +203,14 @@ function wire() {
     saveConfig();
   });
 
+  $("btnAudit").addEventListener("click", () => {
+    showDiag("Running security audit…");
+    fsp.runTask("audit", "");
+  });
+  $("btnUpdateProfile").addEventListener("click", () => {
+    showDiag("Fetching the latest reference profile…");
+    fsp.runTask("update_profile", "");
+  });
   $("btnDiagnose").addEventListener("click", () => {
     try {
       const result = JSON.parse(fsp.selfTest());

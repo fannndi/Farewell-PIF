@@ -20,6 +20,7 @@ __pycache__/
 !/tools/verify.py
 !/tools/doctor.py
 !/tools/keybox_check.py
+!/tools/update_profile.py
 
 # reference material: only public data is whitelisted
 /reference/*

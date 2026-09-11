@@ -4,6 +4,11 @@
 hot-installable hook dex, and a controller app. No root, no Magisk/KernelSU module, no Zygisk,
 no daemons, no system property writes, no files.
 
+Farewell-PIF is a rebrand of **Kaori**; the 2.0.0 rework folds in what we learned from
+**AlwaysStrong** (full TEESimulator-style attestation record, native prop hiding) and from
+**PIF Detector** (key-attestation forgery checks and keybox root anchoring, now a built-in
+*Security audit*). See `docs/DETECTION.md`.
+
 **Supported device: POCO X3 NFC (surya), MIUI 14, Android 12 (SDK 31)** — build
 `V14.0.1.0.SJGMIXM`, keymaster 4.0. Surya compatibility is the priority: the anchors,
 register handling and attestation versions in this repo are calibrated and verified against
@@ -31,11 +36,21 @@ work into the system framework itself:
 ## Features
 
 - Play Integrity fix: keybox attestation (chain forging, `RootOfTrust`, patch levels, ID tags
-  710–717), per-app profiles, target rules `pkg[:process]`, blacklist.
+   710–717), per-app profiles, target rules `pkg[:process]`, blacklist.
+- **Modes**: *PIF profile only* (fingerprint identity, no keybox — keeps app availability like
+   KAI Access working), *PIF + Store* (Play Store sees the spoofed device), keybox attestation
+   on top when a current keybox is installed.
+- **Security audit** (PIF-Detector derived, offline): verifies the forged chain we actually
+   serve — links, CA issuers, challenge echo, leaf signature algorithm — and refuses a keybox
+   whose root is not one of Google's current/anchored hardware roots.
+- **Profile updater** (user initiated, OemPorts10T idea): fetch the latest reference profile
+   from the Advanced tab or `python tools/update_profile.py --push`; accepts Pif-props.json and
+   PIFork/OemPorts `pif.json` (incl. `FIRST_API_LEVEL`).
 - Stealth: one neutral `Settings.Global` key with an XOR-obfuscated envelope; targets default to
-  the DroidGuard process + Play Store only; silent by default.
+   the DroidGuard process + Play Store only; silent by default.
 - Rootless `resetprop` subset: `SystemProperties.get/getInt/getLong/getBoolean` spoofed for
-  Java readers inside target processes.
+   Java readers inside target processes; native `__system_property_get` /
+   `__system_property_read_callback` hooked by `libfarewell.so`.
 - TEE-broken support: TEE probe + software key generation + best-effort keystore import.
 - Secure flag (screenshot) handling, feature overrides, Google Photos preset.
 - Controller app (WebView): status, toggles, profile/keybox manager, per-app targeting,

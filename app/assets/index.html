@@ -29,9 +29,9 @@
   <div class="kv"><span>Fingerprint</span><b id="fpValue" style="font-size:11px">-</b></div>
   <div class="row"><span>Mode</span>
     <select id="spoofMode">
-      <option value="pif">PIF — integrity only</option>
-      <option value="store">Store — Play Store availability</option>
-      <option value="global">Global — all apps</option>
+      <option value="pif">PIF profile only — identity</option>
+      <option value="store">PIF + Store — app availability</option>
+      <option value="global">Global — all apps (SDK 32-)</option>
     </select>
   </div>
   <div class="grid">
@@ -44,6 +44,7 @@
   <div class="card-title">Keybox</div>
   <div class="kv"><span>Keybox</span><b id="kbState">none</b></div>
   <div class="kv"><span>Serial</span><b id="kbSerial" style="font-size:11px">-</b></div>
+  <div class="kv"><span>Root anchor</span><b id="kbRoot" style="font-size:11px">-</b></div>
   <label class="row"><span>Use keybox attestation</span>
     <label class="switch"><input type="checkbox" id="keyboxToggle"><span class="slider"></span></label>
   </label>
@@ -57,6 +58,8 @@
   <summary>Advanced</summary>
   <div class="body">
     <div class="grid">
+      <button class="action" id="btnAudit">Security audit</button>
+      <button class="action" id="btnUpdateProfile">Update profile (online)</button>
       <button class="action" id="btnDiagnose">Run diagnostics</button>
       <button class="action" id="btnRestart">Restart Play</button>
       <button class="action" id="btnRemoveHook">Remove hook</button>
@@ -64,8 +67,9 @@
     </div>
     <pre id="diagOut" class="out" hidden></pre>
     <p class="muted" style="margin-top:12px">
-      Farewell-PIF 1.9.2 — no root, no modules, no Zygisk. Keybox is user supplied;
-      PIF mode works without one. Not affiliated with Google.
+      Farewell-PIF 2.0.0 — rebrand of Kaori, now with AlwaysStrong forge + PIF-Detector
+      hardening. No root, no modules, no Zygisk. Keybox is user supplied; PIF profile mode
+      works without one. Not affiliated with Google.
     </p>
   </div>
 </details>

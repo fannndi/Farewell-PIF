@@ -228,6 +228,22 @@ final class Diag {
 
     private static native String nativeProbe();
 
+    /** Tries the on-device (flashed) library first, so the audit reports the real artifact. */
+    static String systemNativeProbe() {
+        JSONObject out = new JSONObject();
+        try {
+            System.loadLibrary("farewell");
+            out.put("native", nativeProbe());
+            out.put("source", "system");
+        } catch (Throwable t) {
+            try {
+                out.put("error", t.toString());
+            } catch (Throwable ignored) {
+            }
+        }
+        return out.toString();
+    }
+
     static String getLogcat(int lines) {
         try {
             ProcessBuilder builder = new ProcessBuilder("logcat", "-d", "-t",

@@ -525,6 +525,15 @@ final class Config {
                 case "ro.boot.veritymode":
                 case "ro.boot.veritymode.managed":
                     return "enforcing";
+                case "ro.boot.selinux":
+                    return "enforcing";
+                case "ro.secureboot.lockstate":
+                    return "locked";
+                case "ro.boot.warranty_bit":
+                case "ro.vendor.boot.warranty_bit":
+                case "ro.warranty_bit":
+                case "ro.is_ever_orange":
+                    return "0";
                 case "ro.debuggable":
                     return "0";
                 case "ro.secure":
@@ -609,6 +618,12 @@ final class Config {
         static String profileString(JSONObject object, String key) {
             if (object == null) return null;
             String value = object.optString(key, null);
+            if ((value == null || value.isEmpty())
+                    && ("DEVICE_INITIAL_SDK_INT".equals(key) || "FIRST_API_LEVEL".equals(key))) {
+                // OemPorts10T / PIFork style profiles spell the same field FIRST_API_LEVEL.
+                value = object.optString("DEVICE_INITIAL_SDK_INT",
+                        object.optString("FIRST_API_LEVEL", null));
+            }
             return value == null || value.isEmpty() ? null : value;
         }
 

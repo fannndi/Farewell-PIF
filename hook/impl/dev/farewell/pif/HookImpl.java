@@ -137,6 +137,53 @@ public final class HookImpl {
             out.put("forged", forged);
             out.put("issuer", issuer);
             out.put("subject", subject);
+
+            // Detector-style structural audit of the chain actually served (docs/DETECTION.md).
+            org.json.JSONObject audit = new org.json.JSONObject();
+            try {
+                if (chain != null && chain.length > 1) {
+                    boolean links = true;
+                    boolean cas = true;
+                    for (int i = 0; i + 1 < chain.length; i++) {
+                        if (!(chain[i] instanceof X509Certificate)
+                                || !(chain[i + 1] instanceof X509Certificate)) {
+                            links = false;
+                            cas = false;
+                            break;
+                        }
+                        X509Certificate child = (X509Certificate) chain[i];
+                        X509Certificate issuerCert = (X509Certificate) chain[i + 1];
+                        try {
+                            child.verify(issuerCert.getPublicKey());
+                        } catch (Throwable t) {
+                            links = false;
+                        }
+                        if (issuerCert.getBasicConstraints() < 0) cas = false;
+                    }
+                    audit.put("linksOk", links);
+                    audit.put("issuersCa", cas);
+                    X509Certificate leaf = (X509Certificate) chain[0];
+                    audit.put("leafSigAlg", leaf.getSigAlgName());
+                    byte[] echoed = Attestation.challengeOf(leaf);
+                    audit.put("challengeEchoed", echoed != null
+                            && java.util.Arrays.equals(echoed,
+                                    "farewell-selftest".getBytes("UTF-8")));
+                    byte[] rootDer = chain[chain.length - 1].getEncoded();
+                    java.security.MessageDigest digest =
+                            java.security.MessageDigest.getInstance("SHA-256");
+                    StringBuilder hex = new StringBuilder();
+                    for (byte value : digest.digest(rootDer)) {
+                        hex.append(String.format("%02x", value));
+                    }
+                    audit.put("rootFp", hex.toString());
+                } else {
+                    audit.put("error", "no chain");
+                }
+            } catch (Throwable t) {
+                audit.put("error", t.toString());
+            }
+            out.put("audit", audit);
+
             out.put("stats", new org.json.JSONObject(getStats()));
             out.put("events", new org.json.JSONArray(getEvents()));
             out.put("ok", forged);

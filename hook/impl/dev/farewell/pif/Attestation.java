@@ -506,6 +506,23 @@ final class Attestation {
         }
     }
 
+    /** Extracts the attestationChallenge (KeyDescription field [4]) from a forged/real leaf. */
+    static byte[] challengeOf(X509Certificate cert) {
+        try {
+            byte[] extension = cert.getExtensionValue("1.3.6.1.4.1.11129.2.1.17");
+            if (extension == null) return null;
+            ASN1OctetString wrapped = ASN1OctetString.getInstance(extension);
+            ASN1Sequence description = ASN1Sequence.getInstance(wrapped.getOctets());
+            if (description.size() <= 4) return null;
+            ASN1Encodable challenge = description.getObjectAt(4);
+            if (challenge instanceof ASN1OctetString) {
+                return ((ASN1OctetString) challenge).getOctets();
+            }
+        } catch (Throwable ignored) {
+        }
+        return null;
+    }
+
     /** AuthorizationList entries are omitted when the override decided not to report a field. */
     private static void addIfPresent(ASN1EncodableVector vector, ASN1Encodable element) {
         if (element != null) vector.add(element);

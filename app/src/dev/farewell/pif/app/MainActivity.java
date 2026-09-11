@@ -224,6 +224,11 @@ public class MainActivity extends Activity {
             loadDefaultProfileTask();
         } else if ("update_patch".equals(task)) {
             updatePatch();
+        } else if ("audit".equals(task)) {
+            callback(task, Security.audit(this));
+        } else if ("update_profile".equals(task)) {
+            String url = arg != null && arg.startsWith("http") ? arg : null;
+            callback(task, Updater.updateProfile(this, url));
         } else if ("validate_keybox".equals(task)) {
             callback(task, Keyboxes.validate(this).toString());
         } else if ("kill_gms".equals(task)) {
@@ -266,13 +271,17 @@ public class MainActivity extends Activity {
             }
 
             boolean keyboxOk = false;
+            boolean keyboxStale = false;
             JSONArray list = config.optJSONArray("kb");
             if (list != null) {
                 for (int i = 0; i < list.length(); i++) {
                     JSONObject info = Keyboxes.inspect(list.optString(i, ""));
                     if (info.optBoolean("valid", false)) {
-                        keyboxOk = true;
-                        break;
+                        if (info.optBoolean("anchored", false)) {
+                            keyboxOk = true;
+                            break;
+                        }
+                        keyboxStale = true;
                     }
                 }
             }
@@ -302,6 +311,10 @@ public class MainActivity extends Activity {
             out.put("keybox", keyboxOk);
             out.put("hook", hook.optBoolean("ok", false));
             if (!keyboxOk) out.put("mode", "pif-profile");
+            if (keyboxStale && !keyboxOk) {
+                out.put("keyboxWarning",
+                        "keybox root is retired/unknown - STRONG cannot pass; PIF profile mode kept");
+            }
             callback("quick_fix", out.toString());
         } catch (Throwable t) {
             callback("quick_fix", "{\"ok\":false,\"error\":\"" + escape(t.getMessage()) + "\"}");

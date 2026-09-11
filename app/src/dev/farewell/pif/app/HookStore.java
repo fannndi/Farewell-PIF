@@ -8,6 +8,9 @@ import org.json.JSONArray;
 import org.json.JSONObject;
 
 import java.io.ByteArrayOutputStream;
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.FileOutputStream;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
@@ -70,7 +73,39 @@ final class HookStore {
 
     // -------------------------------------------------------------------- config
 
+    /**
+     * Private copy of the config, including the keybox.
+     *
+     * MIUI's settings provider does not persist the large (23 KB) envelope across reboots: the
+     * write is served from memory for the session and the disk keeps the last small value. The
+     * app therefore keeps the authoritative copy here and re-seeds Settings.Global on boot.
+     */
+    private static File channelFile(Context context) {
+        return new File(context.getFilesDir(), "channel.json");
+    }
+
+    static JSONObject loadStored(Context context) {
+        try {
+            File file = channelFile(context);
+            if (!file.exists()) return null;
+            byte[] data = readAll(new FileInputStream(file));
+            return new JSONObject(new String(data, StandardCharsets.UTF_8));
+        } catch (Throwable t) {
+            return null;
+        }
+    }
+
+    private static void saveStored(Context context, JSONObject config) {
+        try {
+            FileOutputStream out = new FileOutputStream(channelFile(context));
+            out.write(config.toString().getBytes(StandardCharsets.UTF_8));
+            out.close();
+        } catch (Throwable ignored) {
+        }
+    }
+
     static JSONObject readConfig(Context context) {
+        JSONObject config;
         try {
             String raw = getString(context, KEY);
             String json = null;
@@ -84,14 +119,27 @@ final class HookStore {
             }
             if (json == null) json = migrateLegacy(context);
             if (json == null) json = DEFAULT_CONFIG;
-            return new JSONObject(json);
+            config = new JSONObject(json);
         } catch (Throwable t) {
             try {
-                return new JSONObject(DEFAULT_CONFIG);
+                config = new JSONObject(DEFAULT_CONFIG);
             } catch (Throwable ignored) {
                 throw new RuntimeException(t);
             }
         }
+        JSONArray keyboxes = config.optJSONArray("kb");
+        if (keyboxes == null || keyboxes.length() == 0) {
+            JSONObject stored = loadStored(context);
+            JSONArray storedKb = stored != null ? stored.optJSONArray("kb") : null;
+            if (storedKb != null && storedKb.length() > 0) {
+                try {
+                    config.put("kb", storedKb);
+                    if (!config.has("pf") && stored.has("pf")) config.put("pf", stored.get("pf"));
+                } catch (Throwable ignored) {
+                }
+            }
+        }
+        return config;
     }
 
     static boolean writeConfig(Context context, JSONObject config) {
@@ -99,6 +147,7 @@ final class HookStore {
             byte[] encoded = xor(config.toString().getBytes(StandardCharsets.UTF_8));
             putString(context, KEY, "F1:" + Base64.encodeToString(encoded, Base64.NO_WRAP));
             for (String legacy : LEGACY_KEYS) deleteKey(context, legacy);
+            saveStored(context, config);
             return true;
         } catch (Throwable t) {
             return false;

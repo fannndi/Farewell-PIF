@@ -25,6 +25,9 @@ public class BootReceiver extends BroadcastReceiver {
         try {
             JSONObject config = HookStore.readConfig(context);
             if (config.optInt("en", 0) != 1) return;
+            // Re-seed Settings.Global: MIUI keeps only the last small value across reboots, so the
+            // keybox restored from app storage must be written back before the hook starts.
+            HookStore.writeConfig(context, config);
             Log.i("FarewellPIF", "boot restore: " + HookStore.installHook(context));
         } catch (Throwable t) {
             Log.e("FarewellPIF", "boot restore failed", t);

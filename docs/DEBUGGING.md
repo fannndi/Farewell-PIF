@@ -75,6 +75,21 @@ Fix: use the real application context (`initContext` cache, then
 `framework.jar` (the bootstrap lives there); afterwards hook updates are sideload-only again.
 Diagnose from the app: `am start ... --es op hookprobe` or `dexprobe`.
 
+## Settings.Global persistence on MIUI (keybox "disappears" after reboot)
+
+MIUI does not persist large (tens of KB) `sys_thermal_profile` writes across reboots: the value
+is served from memory for the session and the disk keeps the last small value, so the keybox
+vanished on every restart. On top of that, **unknown** keys (`sys_perf_dex_*`) are dropped at
+boot entirely.
+
+Mitigation (v1.8.7): the app keeps an authoritative copy of the config, keybox included, in its
+private storage (`files/channel.json`) on every write. `readConfig()` falls back to that copy
+when the settings value has no keybox, and `BootReceiver` re-seeds Settings.Global on
+BOOT_COMPLETED / MY_PACKAGE_REPLACED before installing the hook.
+
+Note: `adb reboot` on this device has twice left it hanging at the boot logo for minutes
+(possibly MIUI flush/fsck behaviour). Prefer a manual reboot and verify the boot first.
+
 ## Verification matrix (tools/verify.py)
 
 Run after flashing or after any hook/config change:

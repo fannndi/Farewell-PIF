@@ -67,10 +67,7 @@ final class Keyboxes {
             List<X509Certificate> chain = new ArrayList<X509Certificate>();
             for (int i = 0; i < certs.getLength() && chain.size() < 8; i++) {
                 try {
-                    chain.add((X509Certificate) cf.generateCertificate(
-                            new ByteArrayInputStream(
-                                    certs.item(i).getTextContent()
-                                            .getBytes(StandardCharsets.UTF_8))));
+                    chain.add(parseCertificate(cf, certs.item(i).getTextContent()));
                 } catch (Throwable ignored) {
                 }
             }
@@ -117,6 +114,26 @@ final class Keyboxes {
         return fingerprint != null && CURRENT_ROOTS.containsKey(fingerprint);
     }
 
+    /**
+     * Accepts PEM with any leading/trailing whitespace (some keyboxes put the BEGIN line on its
+     * own line) and raw base64 DER. CertificateFactory alone rejects the whitespace form.
+     */
+    private static X509Certificate parseCertificate(CertificateFactory factory, String text)
+            throws Exception {
+        String clean = text == null ? "" : text.trim();
+        String header = "-----BEGIN CERTIFICATE-----";
+        byte[] der;
+        if (clean.contains(header)) {
+            int start = clean.indexOf(header) + header.length();
+            int end = clean.indexOf("-----END CERTIFICATE-----");
+            String body = clean.substring(start, end > start ? end : clean.length());
+            der = Base64.decode(body.replaceAll("\\s", ""), Base64.DEFAULT);
+        } else {
+            der = clean.getBytes(StandardCharsets.UTF_8);
+        }
+        return (X509Certificate) factory.generateCertificate(new ByteArrayInputStream(der));
+    }
+
     /** Validates and prepends a keybox to the config channel; returns its serial. */
     static String importKeybox(MainActivity activity, String base64Xml) throws Exception {
         if (base64Xml == null || base64Xml.isEmpty()) {
@@ -132,7 +149,14 @@ final class Keyboxes {
         JSONArray updated = new JSONArray();
         updated.put(base64Xml);
         for (int i = 0; i < keyboxes.length() && i < 3; i++) {
-            updated.put(keyboxes.optString(i, ""));
+            String existing = keyboxes.optString(i, "");
+            if (existing.isEmpty() || existing.equals(base64Xml)) continue;
+            // Keep only keyboxes that still anchor to a current Google root; retired ones can
+            // never pass STRONG and only confuse the audit.
+            JSONObject existingInfo = inspect(existing);
+            if (existingInfo.optBoolean("valid") && existingInfo.optBoolean("anchored")) {
+                updated.put(existing);
+            }
         }
         config.put("kb", dedupe(updated));
         activity.writeConfig(config);

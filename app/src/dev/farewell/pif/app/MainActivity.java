@@ -18,6 +18,7 @@ import org.json.JSONArray;
 import org.json.JSONObject;
 
 import java.io.ByteArrayOutputStream;
+import java.io.File;
 import java.io.InputStream;
 import java.lang.reflect.Method;
 import java.nio.charset.StandardCharsets;
@@ -129,6 +130,19 @@ public class MainActivity extends Activity {
         }).start();
     }
 
+    private byte[] readExternal(String name) {
+        try {
+            if (name == null || name.isEmpty()) return null;
+            File dir = getExternalFilesDir(null);
+            if (dir == null) return null;
+            File file = new File(dir, new File(name).getName());
+            if (!file.isFile()) return null;
+            return readAll(new java.io.FileInputStream(file));
+        } catch (Throwable t) {
+            return null;
+        }
+    }
+
     private static String joinChunks(Intent intent, String prefix) {
         StringBuilder builder = new StringBuilder();
         for (int i = 0; i < 32; i++) {
@@ -157,6 +171,27 @@ public class MainActivity extends Activity {
             writeConfig(config);
             return "config written";
         }
+        if ("set_config_file".equals(op)) {
+            // Large configs (several keyboxes) exceed Windows command-line limits; the PC tool
+            // pushes a file to /sdcard/Android/data/<pkg>/files and passes only its name.
+            byte[] data = readExternal(intent.getStringExtra("file"));
+            if (data == null) return "missing file";
+            JSONObject config = new JSONObject(new String(data, StandardCharsets.UTF_8));
+            sanitize(config);
+            writeConfig(config);
+            return "config written";
+        }
+        if ("set_keybox_file".equals(op)) {
+            byte[] data = readExternal(intent.getStringExtra("file"));
+            if (data == null) return "missing file";
+            try {
+                String serial = Keyboxes.importKeybox(this,
+                        android.util.Base64.encodeToString(data, android.util.Base64.NO_WRAP));
+                return "keybox installed serial=" + serial;
+            } catch (Throwable t) {
+                return "invalid keybox: " + t.getMessage();
+            }
+        }
         if ("set_keybox".equals(op)) {
             String base64 = intent.getStringExtra("b64xml");
             if (base64 == null || base64.isEmpty()) base64 = joinChunks(intent, "kb_");
@@ -177,6 +212,12 @@ public class MainActivity extends Activity {
         }
         if ("verify".equals(op)) {
             return Diag.invokeHookLoaded("selfTest");
+        }
+        if ("audit".equals(op)) {
+            return Security.audit(this);
+        }
+        if ("update_profile".equals(op)) {
+            return Updater.updateProfile(this, intent.getStringExtra("url"));
         }
         if ("dexprobe".equals(op)) {
             return Diag.dexProbe(this);

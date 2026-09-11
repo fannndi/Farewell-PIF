@@ -276,8 +276,10 @@ final class Keybox {
             List<X509Certificate> out = new ArrayList<X509Certificate>();
             for (String pem : pems) {
                 if (pem == null || pem.trim().isEmpty()) continue;
+                // Decode PEM to DER first: some keyboxes put the BEGIN header on its own line
+                // and CertificateFactory rejects the leading whitespace.
                 out.add((X509Certificate) factory.generateCertificate(
-                        new ByteArrayInputStream(pem.getBytes("UTF-8"))));
+                        new ByteArrayInputStream(decodePem(pem))));
             }
             return out.toArray(new X509Certificate[0]);
         } catch (Throwable t) {

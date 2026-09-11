@@ -224,10 +224,25 @@ def chunk_extras(prefix, value, size=6000):
     return extras
 
 
+def push_app_file(adb_bin, name, text):
+    """
+    Writes a payload into the app's external files dir (no permission needed on either side)
+    so large configs/keyboxes bypass the Windows command-line length limit.
+    """
+    temp = Path(tempfile.gettempdir()) / name
+    temp.write_text(text, encoding="utf-8", newline="")
+    remote = "/sdcard/Android/data/dev.farewell.pif/files/" + name
+    result = adb(adb_bin, ["push", str(temp), remote], check=False)
+    return result is not None
+
+
 def push_config(adb_bin, config):
     payload = json.dumps(config, separators=(",", ":"))
     if app_installed(adb_bin):
-        run_app_op(adb_bin, "set_config", chunk_extras("cfg_", payload))
+        if len(payload) > 16000 and push_app_file(adb_bin, "farewell-config.json", payload):
+            run_app_op(adb_bin, "set_config_file", ["--es", "file", "farewell-config.json"])
+        else:
+            run_app_op(adb_bin, "set_config", chunk_extras("cfg_", payload))
         if wait_setting(adb_bin, NEUTRAL_KEY, lambda v: bool(v) and v.startswith("F1:")) is None:
             raise SystemExit("config write via app timed out (check: adb logcat -s FarewellPIF)")
         return
@@ -413,20 +428,29 @@ def main():
             keybox_pending = base64.b64encode(data).decode("ascii")
         else:
             _install_keybox(config, data, args.keybox)
-        config["en"] = 1
+        if config.get("en") != 1:
+            config["en"] = 1
+            changed = True
         if not config.get("fl"):
             config["fl"] = 3
-        changed = True
+            changed = True
 
     if changed:
         push_config(adb_bin, config)
-        if config.get("en") == 1 and (args.enable or args.fix or args.keybox):
-            hook_install(adb_bin, str(HOOK_DEX))
-        elif config.get("en") == 0:
-            hook_remove(adb_bin)
-        if keybox_pending:
+    if config.get("en") == 1 and (args.enable or args.fix or args.keybox):
+        hook_install(adb_bin, str(HOOK_DEX))
+    elif config.get("en") == 0 and changed:
+        hook_remove(adb_bin)
+    if keybox_pending:
+        if (len(keybox_pending) > 16000
+                and push_app_file(adb_bin, "farewell-keybox.xml",
+                                  Path(args.keybox).read_text(
+                                      encoding="utf-8", errors="replace"))):
+            run_app_op(adb_bin, "set_keybox_file", ["--es", "file", "farewell-keybox.xml"])
+        else:
             run_app_op(adb_bin, "set_keybox", chunk_extras("kb_", keybox_pending))
-            print("keybox sent to the app (%d bytes)" % (len(keybox_pending) * 3 // 4))
+        print("keybox sent to the app (%d bytes)" % (len(keybox_pending) * 3 // 4))
+    if changed or keybox_pending:
         if not args.no_restart:
             force_stop(adb_bin)
         print("done")

@@ -235,6 +235,7 @@ public final class HookImpl {
             if (!cfg.enabled) return null;
             String pkg = Config.currentPackage();
             if (pkg == null) return null;
+            if (!cfg.propsFor(pkg, currentProcessName())) return null;
             return cfg.featureOverride(pkg, name);
         } catch (Throwable t) {
             return null;
@@ -323,7 +324,7 @@ public final class HookImpl {
         try {
             Config.Snapshot cfg = Config.get();
             if (cfg == null || !cfg.enabled) return null;
-            if (!cfg.isTarget(Config.currentPackage(), currentProcessName())) return null;
+            if (!cfg.propsFor(Config.currentPackage(), currentProcessName())) return null;
             String value = cfg.spoofProperty(key);
             if (value != null) sStatProperty.incrementAndGet();
             return value != null ? value : null;

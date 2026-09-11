@@ -45,6 +45,17 @@ provider not up yet) is never cached, a deny is retried after 5 s, and `initCont
 - `tools/verify.py` runs the whole verification matrix over ADB; the app exposes the same checks as
   the *Framework self-test* and *Hook live test* buttons and in the exported debug bundle.
 
+## Audited conventions
+
+- **Vending stays attestation-only on Android 12L and below.** Spoofing the Play Store
+  fingerprint (PlayIntegrityFork's `spoofVendingFinger`) breaks Play Integrity/GMS on SDK <= 32,
+  so `Config.propsFor()` excludes `com.android.vending` from Build/property/feature spoofing while
+  keeping it a target for keybox attestation. Audited from AlwaysStrong `engine.sh`.
+- **GMS target is process-scoped** (`com.google.android.gms:com.google.android.gms.unstable`) so
+  only DroidGuard gets the spoofed identity.
+- **Signature and provider spoofing default off** (`spoofSignature=0`, `spoofProvider=0` upstream),
+  matching the flags bit default of 3 (props + keybox).
+
 ## Components
 
 | Path | Role |

@@ -390,6 +390,23 @@ final class Config {
             return false;
         }
 
+        /**
+         * Whether Build/property spoofing applies to this process.
+         *
+         * On Android 12L and below, spoofing the Play Store (Vending) fingerprint breaks Play
+         * Integrity / GMS instead of helping, so Vending stays a target for attestation only.
+         * Mirrors PlayIntegrityFork's spoofVendingFinger=0 default for SDK &lt;= 32 (audited from
+         * AlwaysStrong engine.sh).
+         */
+        boolean propsFor(String pkg, String process) {
+            if (!isTarget(pkg, process)) return false;
+            if (android.os.Build.VERSION.SDK_INT <= 32
+                    && "com.android.vending".equals(pkg)) {
+                return false;
+            }
+            return true;
+        }
+
         JSONObject profileFor(String pkg) {
             JSONObject entry = pkg != null ? appProfiles.get(pkg) : null;
             JSONObject override = entry != null ? entry.optJSONObject("pf") : null;

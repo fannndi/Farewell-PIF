@@ -44,7 +44,7 @@ final class Props {
         } catch (Throwable ignored) {
         }
         if (pkg == null) return;
-        if (!cfg.isTarget(pkg, process)) return;
+        if (!cfg.propsFor(pkg, process)) return;
         if (cfg.propsEnabled()) {
             applyBuildFields(cfg.profileFor(pkg));
         }
@@ -59,7 +59,7 @@ final class Props {
             if (cfg == null || !cfg.enabled || !cfg.propsEnabled()) return;
             String pkg = Config.currentPackage();
             if (pkg == null) return;
-            if (!cfg.isTarget(pkg, HookImpl.currentProcessName())) return;
+            if (!cfg.propsFor(pkg, HookImpl.currentProcessName())) return;
             applyBuildFields(cfg.profileFor(pkg));
         } catch (Throwable ignored) {
         }

@@ -24,6 +24,7 @@ SMALI3 = ROOT / "tools" / "smali3"
 R8_CANDIDATES = sorted((ROOT / "tools").glob("r8*.jar"))
 R8_JAR = R8_CANDIDATES[0] if R8_CANDIDATES else ROOT / "tools" / "r8.jar"
 BUILD = ROOT / "build" / "hook"
+OUT = ROOT / "out"
 PATCHER = ROOT / "patcher" / "farewell_patch.py"
 
 

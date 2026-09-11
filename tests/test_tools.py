@@ -103,6 +103,27 @@ class ProfileTests(unittest.TestCase):
             Path(path).unlink(missing_ok=True)
 
 
+patcher = load("farewell_patcher", ROOT / "patcher" / "farewell_patch.py")
+
+
+class PatcherTemplateTests(unittest.TestCase):
+    """Regression: hook snippets must fall through to the original code only when the hook
+    returned null (if-eqz). Using if-nez discards non-null results (the 1.8.6 forge bug)."""
+
+    def test_result_templates_branch_on_null(self):
+        names = ("CODE_CHAIN_FOR_ALIAS", "CODE_KEY_FOR_ALIAS", "CODE_CERT_FOR_ALIAS",
+                 "CODE_SOFTWARE_KEY", "CODE_PROP_STR", "CODE_PROP_STR_NULL",
+                 "CODE_PROP_INT", "CODE_PROP_LONG", "CODE_PROP_BOOL")
+        for name in names:
+            snippet = getattr(patcher, name)
+            self.assertIn("if-eqz", snippet, name)
+            self.assertNotIn("if-nez", snippet, name)
+
+    def test_no_inverted_branches_anywhere(self):
+        source = Path(patcher.__file__).read_text(encoding="utf-8")
+        self.assertNotIn("if-nez", source)
+
+
 class DerReaderTests(unittest.TestCase):
     def test_high_tag_and_integers(self):
         blob = lab.der_seq([

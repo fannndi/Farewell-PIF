@@ -39,6 +39,9 @@ public final class HookImpl {
     private static final AtomicInteger sStatKeyEntry = new AtomicInteger();
     private static final AtomicInteger sStatProperty = new AtomicInteger();
     private static final AtomicInteger sStatImport = new AtomicInteger();
+    private static final AtomicInteger sStatChainAlias = new AtomicInteger();
+    private static final AtomicInteger sStatCertAlias = new AtomicInteger();
+    private static final AtomicInteger sStatKeyAlias = new AtomicInteger();
     private static final java.util.ArrayDeque<String> sEvents =
             new java.util.ArrayDeque<String>();
     private static final int MAX_EVENTS = 64;
@@ -79,6 +82,9 @@ public final class HookImpl {
             out.put("keyEntry", sStatKeyEntry.get());
             out.put("property", sStatProperty.get());
             out.put("import", sStatImport.get());
+            out.put("chainAlias", sStatChainAlias.get());
+            out.put("certAlias", sStatCertAlias.get());
+            out.put("keyAlias", sStatKeyAlias.get());
             out.put("tee", sTeeState == 1 ? "works" : sTeeState == 2 ? "broken" : "unknown");
             return out.toString();
         } catch (Throwable t) {
@@ -120,8 +126,24 @@ public final class HookImpl {
             KeyPair pair = generator.generateKeyPair();
             out.put("keygen", pair != null && pair.getPrivate() != null);
 
+            int chainBefore = sStatChainAlias.get();
             java.security.cert.Certificate[] chain = keyStore.getCertificateChain(alias);
+            out.put("chainDelta", sStatChainAlias.get() - chainBefore);
             out.put("chainLength", chain != null ? chain.length : 0);
+            try {
+                java.security.cert.Certificate cert = keyStore.getCertificate(alias);
+                out.put("certDirect", cert != null ? "yes" : "null");
+            } catch (Throwable t) {
+                out.put("certDirect", "error: " + t);
+            }
+            try {
+                Key key = keyStore.getKey(alias, null);
+                out.put("keyDirect", key != null ? "yes" : "null");
+            } catch (Throwable t) {
+                out.put("keyDirect", "error: " + t);
+            }
+            java.security.cert.Certificate[] cached = certificateChainForAlias(alias);
+            out.put("cacheChain", cached != null ? cached.length : -1);
             boolean forged = false;
             String issuer = "";
             String subject = "";
@@ -256,6 +278,7 @@ public final class HookImpl {
     /** Called at the start of keystore2.AndroidKeyStoreSpi.engineGetCertificateChain(String). */
     public static Certificate[] certificateChainForAlias(String alias) {
         try {
+            sStatChainAlias.incrementAndGet();
             if (alias == null) return null;
             Generated generated = sGenerated.get(alias);
             if (generated == null) return null;
@@ -269,6 +292,7 @@ public final class HookImpl {
     /** Called at the start of keystore2.AndroidKeyStoreSpi.engineGetKey(String, char[]). */
     public static Key softwareKeyForAlias(String alias) {
         try {
+            sStatKeyAlias.incrementAndGet();
             if (alias == null) return null;
             Generated generated = sGenerated.get(alias);
             return generated != null ? generated.privateKey : null;
@@ -280,6 +304,7 @@ public final class HookImpl {
     /** Called at the start of keystore2.AndroidKeyStoreSpi.engineGetCertificate(String). */
     public static Certificate certificateForAlias(String alias) {
         try {
+            sStatCertAlias.incrementAndGet();
             if (alias == null) return null;
             Generated generated = sGenerated.get(alias);
             if (generated == null || generated.chain == null || generated.chain.length == 0) {

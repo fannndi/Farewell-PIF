@@ -90,6 +90,16 @@ BOOT_COMPLETED / MY_PACKAGE_REPLACED before installing the hook.
 Note: `adb reboot` on this device has twice left it hanging at the boot logo for minutes
 (possibly MIUI flush/fsck behaviour). Prefer a manual reboot and verify the boot first.
 
+## Forged results were discarded (inverted branch, fixed in 1.8.7 jars)
+
+Three patcher snippets (`CODE_CHAIN_FOR_ALIAS`, `CODE_KEY_FOR_ALIAS`, `CODE_CERT_FOR_ALIAS`)
+branched with `if-nez`, which jumps when the hook result is **non-null** — so every forged
+chain/key/certificate was thrown away and the original (empty) result was returned. The hook
+looked alive (counters/events/logs) while `KeyStore.getCertificateChain`, `getKey` and
+`getCertificate` always returned null. All other snippets use `if-eqz` (fall through to the
+original only on null). Regression tests in `tests/test_tools.py` now assert no `if-nez` exists
+in the patcher.
+
 ## Verification matrix (tools/verify.py)
 
 Run after flashing or after any hook/config change:

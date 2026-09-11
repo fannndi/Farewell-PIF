@@ -128,14 +128,16 @@ final class HookStore {
                 throw new RuntimeException(t);
             }
         }
-        JSONArray keyboxes = config.optJSONArray("kb");
-        if (keyboxes == null || keyboxes.length() == 0) {
-            JSONObject stored = loadStored(context);
-            JSONArray storedKb = stored != null ? stored.optJSONArray("kb") : null;
-            if (storedKb != null && storedKb.length() > 0) {
+        JSONObject stored = loadStored(context);
+        if (stored != null) {
+            // The private copy is always at least as fresh as Settings.Global (every write updates
+            // both), and Settings.Global loses large values across reboots. Let it win so flags,
+            // targets and keyboxes all survive.
+            java.util.Iterator<String> keys = stored.keys();
+            while (keys.hasNext()) {
+                String key = keys.next();
                 try {
-                    config.put("kb", storedKb);
-                    if (!config.has("pf") && stored.has("pf")) config.put("pf", stored.get("pf"));
+                    config.put(key, stored.get(key));
                 } catch (Throwable ignored) {
                 }
             }

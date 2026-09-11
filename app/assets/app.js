@@ -128,6 +128,10 @@ window.__cb = function (event, dataJson) {
     }
     return;
   }
+  if (event === "clear_caches") {
+    toast("GMS cache: " + data.gms + " · Store cache: " + data.vending);
+    return;
+  }
   if (event === "audit") {
     if (data.lines) showDiag(data.lines.join("\n"));
     else showDiag(JSON.stringify(data, null, 2));
@@ -213,6 +217,12 @@ function wire() {
   $("btnAudit").addEventListener("click", () => {
     showDiag("Running security audit…");
     fsp.runTask("audit", "");
+  });
+  $("btnClearCaches").addEventListener("click", () => {
+    fsp.runTask("clear_caches", "");
+  });
+  $("btnPlayData").addEventListener("click", () => {
+    fsp.runTask("clear_play_data", "");
   });
   $("btnUpdateProfile").addEventListener("click", () => {
     showDiag("Fetching the latest reference profile…");

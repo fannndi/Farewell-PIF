@@ -3,6 +3,7 @@ package dev.farewell.pif.app;
 import android.app.Activity;
 import android.app.ActivityManager;
 import android.content.Intent;
+import android.content.pm.PackageManager;
 import android.net.Uri;
 import android.os.Bundle;
 import android.os.Handler;
@@ -216,6 +217,13 @@ public class MainActivity extends Activity {
         if ("audit".equals(op)) {
             return Security.audit(this);
         }
+        if ("clear_play_data".equals(op)) {
+            openPlayStoreInfo();
+            return "opened Play Store app info";
+        }
+        if ("clear_caches".equals(op)) {
+            return clearCaches();
+        }
         if ("update_profile".equals(op)) {
             return Updater.updateProfile(this, intent.getStringExtra("url"));
         }
@@ -267,6 +275,11 @@ public class MainActivity extends Activity {
             updatePatch();
         } else if ("audit".equals(task)) {
             callback(task, Security.audit(this));
+        } else if ("clear_play_data".equals(task)) {
+            openPlayStoreInfo();
+            callback(task, "{\"ok\":true}");
+        } else if ("clear_caches".equals(task)) {
+            callback(task, clearCaches());
         } else if ("update_profile".equals(task)) {
             String url = arg != null && arg.startsWith("http") ? arg : null;
             callback(task, Updater.updateProfile(this, url));
@@ -357,6 +370,13 @@ public class MainActivity extends Activity {
                         "keybox root is retired/unknown - STRONG cannot pass; PIF profile mode kept");
             }
             callback("quick_fix", out.toString());
+            if ((flags & 64) != 0) {
+                // Store mode: refresh what we can automatically, then open the data-wipe page.
+                out = new JSONObject(clearCaches());
+                toast("Cache GMS/Store: " + out.optString("gms") + " / "
+                        + out.optString("vending"));
+                openPlayStoreInfo();
+            }
         } catch (Throwable t) {
             callback("quick_fix", "{\"ok\":false,\"error\":\"" + escape(t.getMessage()) + "\"}");
         }
@@ -523,6 +543,67 @@ public class MainActivity extends Activity {
     }
 
     // ------------------------------------------------------------------ helpers
+
+    /**
+     * Clears another app's cache through the trusted boot-classpath bridge, so the hidden
+     * PackageManager.deleteApplicationCacheFiles is callable from the app. Needs
+     * DELETE_CACHE_FILES (signature|privileged, granted via the privapp allowlist).
+     */
+    private String clearAppCache(String pkg) {
+        try {
+            if (checkSelfPermission("android.permission.DELETE_CACHE_FILES")
+                    != PackageManager.PERMISSION_GRANTED) {
+                return "denied (repack with the updated privapp XML)";
+            }
+            Class<?> hook = Class.forName("dev.farewell.pif.FarewellHook");
+            Class<?> observer = Class.forName("android.content.pm.IPackageDeleteObserver");
+            java.lang.reflect.Method invoke = hook.getMethod("invokeDeclared",
+                    Object.class, String.class, Class[].class, Object[].class);
+            invoke.invoke(null, getPackageManager(), "deleteApplicationCacheFiles",
+                    new Class<?>[]{String.class, observer}, new Object[]{pkg, null});
+            return "ok";
+        } catch (Throwable t) {
+            return "failed: " + t;
+        }
+    }
+
+    String clearCaches() {
+        JSONObject out = new JSONObject();
+        try {
+            out.put("gms", clearAppCache("com.google.android.gms"));
+            out.put("vending", clearAppCache("com.android.vending"));
+            out.put("ok", true);
+        } catch (Throwable t) {
+            try {
+                out.put("ok", false);
+                out.put("error", String.valueOf(t));
+            } catch (Throwable ignored) {
+            }
+        }
+        return out.toString();
+    }
+
+    /**
+     * Opens the Play Store's app-info page so the user can tap Clear data: the device profile
+     * cached by the store is only refreshed by a data wipe, and CLEAR_APP_USER_DATA is a
+     * signature|installer permission this priv-app cannot hold on MIUI.
+     */
+    void openPlayStoreInfo() {
+        handler.post(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    Intent intent = new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS);
+                    intent.setData(Uri.parse("package:com.android.vending"));
+                    intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                    startActivity(intent);
+                    toast("Tap Clear data, lalu buka Play Store lagi");
+                } catch (Throwable t) {
+                    toast("Open app info failed: " + t.getMessage());
+                }
+            }
+        });
+    }
 
     private void killGms(boolean clearPlayStore) {
         String[] packages = {

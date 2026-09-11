@@ -349,6 +349,7 @@ final class Config {
 
         boolean enabled;
         boolean debug;
+        boolean verbose;
         int flags;
         int mode = MODE_AUTO;
         int keyboxIndex = -1;
@@ -772,6 +773,7 @@ final class Config {
                 snapshot.enabled = object.optInt("en", 0) == 1;
                 if (!snapshot.enabled) return DISABLED;
                 snapshot.debug = object.optInt("dbg", 0) == 1;
+                snapshot.verbose = object.optInt("dbg", 0) >= 2;
                 snapshot.flags = object.optInt("fl", FLAG_KEYBOX | FLAG_PROPS);
                 snapshot.mode = parseMode(object.optString("md", "auto"));
                 snapshot.keyboxIndex = object.optInt("kbi", -1);
@@ -808,7 +810,8 @@ final class Config {
             if (getInt(context, KEY_ENABLE, 0) != 1) return DISABLED;
             Snapshot snapshot = new Snapshot();
             snapshot.enabled = true;
-            snapshot.debug = getInt(context, KEY_DEBUG, 0) == 1;
+            snapshot.debug = getInt(context, KEY_DEBUG, 0) >= 1;
+            snapshot.verbose = getInt(context, KEY_DEBUG, 0) >= 2;
             snapshot.flags = getInt(context, KEY_FLAGS, FLAG_KEYBOX | FLAG_PROPS);
             snapshot.mode = parseMode(getString(context, KEY_MODE, null));
             snapshot.keyboxIndex = getInt(context, KEY_KEYBOX_INDEX, -1);

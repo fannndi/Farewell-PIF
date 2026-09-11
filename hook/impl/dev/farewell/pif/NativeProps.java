@@ -33,7 +33,8 @@ final class NativeProps {
             "ro.build.id", "ro.build.version.incremental", "ro.build.version.release",
             "ro.build.description", "ro.build.version.security_patch",
             "ro.vendor.build.security_patch", "ro.system.build.version.security_patch",
-            "ro.product.first_api_level",
+            "ro.board.api_level", "ro.board.first_api_level",
+            "ro.product.first_api_level", "ro.vendor.api_level",
     };
 
     private static volatile boolean sLoaded;
@@ -42,6 +43,18 @@ final class NativeProps {
     private static native int enable(String[] keys, String[] values);
 
     static native String nativeGet(String key);
+
+    static native String nativeGetReal(String key);
+
+    /** Real property value read around the hook, for attestation fields that must match stock. */
+    static String realProperty(String key) {
+        if (!sLoaded && !load()) return null;
+        try {
+            return nativeGetReal(key);
+        } catch (Throwable t) {
+            return null;
+        }
+    }
 
     private NativeProps() {
     }

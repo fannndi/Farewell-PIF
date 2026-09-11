@@ -155,6 +155,20 @@ Java_dev_farewell_pif_NativeProps_nativeGet(JNIEnv *env, jclass clazz, jstring k
     return (*env)->NewStringUTF(env, value);
 }
 
+// Real value, bypassing the hook (for attestation defaults that must match the device).
+JNIEXPORT jstring JNICALL
+Java_dev_farewell_pif_NativeProps_nativeGetReal(JNIEnv *env, jclass clazz, jstring key) {
+    if (key == NULL) return NULL;
+    const char *keyText = (*env)->GetStringUTFChars(env, key, NULL);
+    char value[PROP_VALUE_MAX];
+    value[0] = '\0';
+    int len = g_orig_get != NULL ? g_orig_get(keyText, value)
+                                 : __system_property_get(keyText, value);
+    (*env)->ReleaseStringUTFChars(env, key, keyText);
+    if (len <= 0) return NULL;
+    return (*env)->NewStringUTF(env, value);
+}
+
 // App-side probe: reads before, installs a one-key spoof, reads after. Proves the hook works
 // end to end without a repack (lib loaded from the app's files dir).
 JNIEXPORT jstring JNICALL

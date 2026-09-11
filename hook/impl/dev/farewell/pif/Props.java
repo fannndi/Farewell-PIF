@@ -27,15 +27,14 @@ import java.util.concurrent.atomic.AtomicBoolean;
  */
 final class Props {
     /**
-     * Exactly the fields PlayIntegrityFork spoofs: the five identifying Build values plus
-     * SECURITY_PATCH and DEVICE_INITIAL_SDK_INT. Everything else (BRAND, ID, RELEASE, TYPE,
-     * TAGS, INCREMENTAL, HOST, DISPLAY) stays real - spoofing them created a mixed identity
-     * that the Play Integrity server rejected outright.
+     * The full Build field set PlayIntegrityFork spoofs with spoofBuild=1 (example.pif.prop).
+     * Missing entries are derived from FINGERPRINT by Config.expandFingerprint().
      */
     private static final String[] BUILD_FIELDS = {
-            "MANUFACTURER", "MODEL", "FINGERPRINT", "PRODUCT", "DEVICE"
+            "MANUFACTURER", "MODEL", "FINGERPRINT", "BRAND", "PRODUCT", "DEVICE",
+            "ID", "INCREMENTAL", "TYPE", "TAGS"
     };
-    private static final String[] VERSION_FIELDS = {"SECURITY_PATCH"};
+    private static final String[] VERSION_FIELDS = {"RELEASE", "SECURITY_PATCH", "INCREMENTAL"};
 
     private static final AtomicBoolean sSignatureInstalled = new AtomicBoolean(false);
 

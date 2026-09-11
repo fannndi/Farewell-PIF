@@ -364,9 +364,15 @@ final class Attestation {
                 return explicitInteger(tag, cfg.osVersion());
             case TAG_OS_PATCHLEVEL:
                 return explicitInteger(tag, cfg.osPatchLevel(profile));
-            case TAG_VENDOR_PATCHLEVEL:
-            case TAG_BOOT_PATCHLEVEL:
+            case TAG_VENDOR_PATCHLEVEL: {
+                // TEESimulator's security_patch.txt default: vendor=device_default.
+                int[] real = parsePatch(NativeProps.realProperty("ro.vendor.build.security_patch"));
+                if (real != null) return explicitInteger(tag, real[0] * 100 + real[1]);
                 return explicitInteger(tag, cfg.patchLevelDay(profile));
+            }
+            case TAG_BOOT_PATCHLEVEL:
+                // TEESimulator's default is boot=no: the field is omitted.
+                return null;
             default:
                 if (tag >= TAG_ID_BRAND && tag <= TAG_ID_MODEL) {
                     String value = cfg.devicePropForTag(tag, profile);
@@ -381,6 +387,17 @@ final class Attestation {
                     }
                 }
                 return null;
+        }
+    }
+
+    private static int[] parsePatch(String value) {
+        if (value == null) return null;
+        try {
+            String[] parts = value.trim().split("-");
+            if (parts.length < 2) return null;
+            return new int[]{Integer.parseInt(parts[0]), Integer.parseInt(parts[1])};
+        } catch (Throwable t) {
+            return null;
         }
     }
 

@@ -384,6 +384,10 @@ public final class HookImpl {
                 }
             }
             String value = cfg.spoofProperty(key);
+            if (cfg.verbose) {
+                // PIFork's verboseLogs: shows every property DroidGuard checks.
+                debug("prop " + key + " -> " + (value != null ? value : "<passthrough>"));
+            }
             if (value != null) sStatProperty.incrementAndGet();
             return value != null ? value : null;
         } catch (Throwable t) {

@@ -17,6 +17,7 @@ __pycache__/
 !/tools/attestation_lab.py
 !/tools/adb_debug.py
 !/tools/package.py
+!/tools/verify.py
 
 # reference material: only public data is whitelisted
 /reference/*

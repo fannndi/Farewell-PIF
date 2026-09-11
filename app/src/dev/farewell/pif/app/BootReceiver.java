@@ -29,6 +29,9 @@ public class BootReceiver extends BroadcastReceiver {
             // keybox restored from app storage must be written back before the hook starts.
             HookStore.writeConfig(context, config);
             Log.i("FarewellPIF", "boot restore: " + HookStore.installHook(context));
+            if (config.optInt("au", 0) == 1) {
+                Updater.autoUpdate(context);
+            }
         } catch (Throwable t) {
             Log.e("FarewellPIF", "boot restore failed", t);
         }

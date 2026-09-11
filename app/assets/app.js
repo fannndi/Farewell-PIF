@@ -107,6 +107,7 @@ function render(state) {
       : "retired/unknown — STRONG rejected") : "invalid")
     : "-";
   $("keyboxToggle").checked = (flags & 2) !== 0;
+  $("autoUpdate").checked = Number(config.au) === 1;
 }
 
 /* --------------------------------------------------------------- callbacks */
@@ -201,6 +202,12 @@ function wire() {
     let flags = Number(config.fl) || 0;
     config.fl = on ? (flags | 2) : (flags & ~2);
     saveConfig();
+  });
+
+  $("autoUpdate").addEventListener("change", () => {
+    config.au = $("autoUpdate").checked ? 1 : 0;
+    saveConfig();
+    toast(config.au ? "Profile auto-update on (boot, when online)" : "Profile auto-update off");
   });
 
   $("btnAudit").addEventListener("click", () => {

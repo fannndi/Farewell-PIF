@@ -45,7 +45,8 @@ work into the system framework itself:
    whose root is not one of Google's current/anchored hardware roots.
 - **Profile updater** (user initiated, OemPorts10T idea): fetch the latest reference profile
    from the Advanced tab or `python tools/update_profile.py --push`; accepts Pif-props.json and
-   PIFork/OemPorts `pif.json` (incl. `FIRST_API_LEVEL`).
+   PIFork/OemPorts `pif.json` (incl. `FIRST_API_LEVEL`). Optional **auto-update at boot**
+   (Advanced toggle): one fetch from the app when online, no daemon, no init service.
 - Stealth: one neutral `Settings.Global` key with an XOR-obfuscated envelope; targets default to
    the DroidGuard process + Play Store only; silent by default.
 - Rootless `resetprop` subset: `SystemProperties.get/getInt/getLong/getBoolean` spoofed for

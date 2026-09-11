@@ -88,6 +88,33 @@ Google's revocation list" does not prove the root is current.
 7. Keep `attestationSecurityLevel` honest: TEE only for a Google-anchored hardware root. If a
    software keybox must be used, emit `Software` (0) and accept that STRONG cannot pass.
 
+## Why we do NOT copy the init-service + SELinux approach
+
+OemPorts10T ships a solid root implementation: an ELF `pif-updater` (auto-fetches its APK at
+boot), an init service with its own SELinux domain (`u:r:pif_updater:s0`), a `sensitiveprops.sh`
+run as root at `on fs`, and CIL/file_contexts patches. It is the right shape for a ROM-porting
+kit, and the wrong shape for Farewell-PIF:
+
+- Every process would see the fake boot props (their `on fs` resetprop is global). Our design
+  spoofs per target process only, which is why PIF Detector's `PIF`/`TRICKYSTORE` checks cannot
+  fire against us unprivileged, and why its property cross-validation is inert.
+- Their global `ro.build.type`/`ro.*.build.tags` resets are exactly the signals PIF Detector
+  looks for (scalars disagreeing with the fingerprint). On surya those properties are already
+  `user`/`release-keys`, so there is nothing to gain.
+- A running root service, a binary under `/system/bin`, a custom SELinux domain and boot-time
+  network traffic are all artifacts a detector or a banking app can enumerate. Farewell-PIF has
+  no processes, no daemons and no runtime files.
+- The one genuine advantage — properties set before anything reads them — is not needed for Play
+  Integrity: the bootstrap loads `HookImpl` in `Instrumentation.newApplication`, i.e. before the
+  Application constructor runs and before DroidGuard reads any property. `libfarewell.so` is
+  loaded from the same `ensureProcessInit()` path, so native readers in target processes are
+  covered too. Apps that check the bootloader locally are handled by adding them to `tg`.
+
+What we did adopt from that kit: the **opt-in profile auto-update** (`Updater.autoUpdate`, run
+once from `BootReceiver` when `"au": 1`, only if online and only when the fingerprint changed)
+and the extended boot-hiding property set from `sensitiveprops.sh`. No daemon, no init service,
+no sepolicy.
+
 ## Baseline test on device
 
 Install the detector APK on surya and run it once, unprivileged, with Farewell-PIF active:

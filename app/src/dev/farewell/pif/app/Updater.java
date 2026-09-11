@@ -23,6 +23,43 @@ final class Updater {
     private Updater() {
     }
 
+    /**
+     * Opt-in boot fetch (config "au"=1): refreshes the profile when the device is online.
+     * Rootless counterpart of the OemPorts10T init service: runs inside this app's process,
+     * only on boot, never in the background, and does nothing when unchanged or offline.
+     */
+    static void autoUpdate(final android.content.Context context) {
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                try {
+                    JSONObject config = HookStore.readConfig(context);
+                    if (config.optInt("au", 0) != 1) return;
+                    android.net.ConnectivityManager manager =
+                            (android.net.ConnectivityManager) context.getSystemService(
+                                    android.content.Context.CONNECTIVITY_SERVICE);
+                    android.net.NetworkInfo network = manager != null
+                            ? manager.getActiveNetworkInfo() : null;
+                    if (network == null || !network.isConnected()) return;
+                    String url = config.optString("auUrl", DEFAULT_PROFILE_URL);
+                    JSONObject profile = parseProfile(fetch(url));
+                    if (profile == null || profile.optString("FINGERPRINT", "").isEmpty()) return;
+                    JSONObject current = config.optJSONObject("pf");
+                    if (current != null && profile.optString("FINGERPRINT", "")
+                            .equals(current.optString("FINGERPRINT", ""))) {
+                        return;
+                    }
+                    config.put("pf", profile);
+                    HookStore.writeConfig(context, config);
+                    android.util.Log.i("FarewellPIF",
+                            "auto-updated profile -> " + profile.optString("FINGERPRINT"));
+                } catch (Throwable t) {
+                    android.util.Log.i("FarewellPIF", "auto-update skipped: " + t);
+                }
+            }
+        }, "farewell-autoupdate").start();
+    }
+
     static String updateProfile(MainActivity activity, String url) {
         JSONObject out = new JSONObject();
         try {

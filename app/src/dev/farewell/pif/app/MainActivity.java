@@ -709,12 +709,19 @@ public class MainActivity extends Activity {
                 }
             }
 
-            if (config.optInt("en", 0) != 1) {
-                config.put("en", 1);
+            int flags = config.optInt("fl", 0) | 1;
+            if (keyboxOk) {
+                flags |= 2;
+            } else {
+                flags &= ~2;
+            }
+            if (flags != config.optInt("fl", 0)) {
+                config.put("fl", flags);
                 changed = true;
             }
-            if (config.optInt("fl", 0) == 0) {
-                config.put("fl", 3);
+
+            if (config.optInt("en", 0) != 1) {
+                config.put("en", 1);
                 changed = true;
             }
             if (changed) writeConfig(config);
@@ -723,10 +730,10 @@ public class MainActivity extends Activity {
             killGms(false);
 
             JSONObject out = new JSONObject();
-            out.put("ok", keyboxOk);
+            out.put("ok", true);
             out.put("keybox", keyboxOk);
             out.put("hook", hook.optBoolean("ok", false));
-            if (!keyboxOk) out.put("error", "no valid keybox, import keybox.xml first");
+            if (!keyboxOk) out.put("mode", "pif-profile");
             callback("quick_fix", out.toString());
         } catch (Throwable t) {
             callback("quick_fix", "{\"ok\":false,\"error\":\"" + escape(t.getMessage()) + "\"}");

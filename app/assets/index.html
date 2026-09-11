@@ -17,145 +17,55 @@
 
 <section class="card hero">
   <div class="hero-state" id="heroState">🧩</div>
-  <div class="hero-text" id="heroText">Checking status…</div>
-  <div class="hero-sub" id="heroSub">Rootless Play Integrity for MIUI 14 / Android 12</div>
-  <button class="primary" id="btnPrimary" disabled>FIX INTEGRITY</button>
-  <p class="hint" id="heroHint">One tap: enable, apply profile, install hook and restart Play.</p>
+  <div class="hero-text" id="heroText">Checking…</div>
+  <div class="hero-sub" id="heroSub">Rootless Play Integrity for surya</div>
+  <button class="primary" id="btnPrimary" disabled>APPLY</button>
+  <p class="hint" id="heroHint">One tap: enable, apply fingerprint, install hook, restart Play.</p>
 </section>
 
 <section class="card">
-  <div class="card-title">Status</div>
-  <div class="kv"><span>Hook</span><b id="stHook">-</b></div>
-  <div class="kv"><span>Keybox</span><b id="stKeybox">-</b></div>
-  <div class="kv"><span>Profile</span><b id="stProfile">-</b></div>
-  <div class="kv"><span>TEE</span><b id="stTee">-</b></div>
-  <div class="kv"><span>Targets</span><b id="stTargets">-</b></div>
-  <div class="grid">
-    <button class="action" id="btnDiagnose">Run diagnostics</button>
-    <button class="action ghost" id="btnImportQuick">Import keybox</button>
+  <div class="card-title">Fingerprint</div>
+  <div class="kv"><span>Profile</span><b id="fpModel">none</b></div>
+  <div class="kv"><span>Fingerprint</span><b id="fpValue" style="font-size:11px">-</b></div>
+  <div class="row"><span>Mode</span>
+    <select id="spoofMode">
+      <option value="pif">PIF — integrity only</option>
+      <option value="store">Store — Play Store availability</option>
+      <option value="global">Global — all apps</option>
+    </select>
   </div>
-  <pre id="diagOut" class="out" hidden></pre>
+  <div class="grid">
+    <button class="action" id="btnImportProfile">Import Pif-props.json</button>
+    <button class="action ghost" id="btnClearProfile">Clear profile</button>
+  </div>
+</section>
+
+<section class="card">
+  <div class="card-title">Keybox</div>
+  <div class="kv"><span>Keybox</span><b id="kbState">none</b></div>
+  <div class="kv"><span>Serial</span><b id="kbSerial" style="font-size:11px">-</b></div>
+  <label class="row"><span>Use keybox attestation</span>
+    <label class="switch"><input type="checkbox" id="keyboxToggle"><span class="slider"></span></label>
+  </label>
+  <div class="grid">
+    <button class="action" id="btnImportKeybox">Import keybox.xml</button>
+    <button class="action ghost" id="btnRemoveKeybox">Remove keybox</button>
+  </div>
 </section>
 
 <details class="card" id="advanced">
   <summary>Advanced</summary>
   <div class="body">
-
-    <details class="sub" open>
-      <summary>Spoofing</summary>
-      <label class="row"><span>Enable hook</span>
-        <label class="switch"><input type="checkbox" id="enableSwitch"><span class="slider"></span></label>
-      </label>
-      <label class="row"><span>Properties / Pixel profile</span>
-        <input type="checkbox" class="flag" data-flag="1"></label>
-      <label class="row"><span>Keybox attestation</span>
-        <input type="checkbox" class="flag" data-flag="2"></label>
-      <label class="row"><span>Disable secure flag</span>
-        <input type="checkbox" class="flag" data-flag="4"></label>
-      <label class="row"><span>Platform signature spoof</span>
-        <input type="checkbox" class="flag" data-flag="8"></label>
-      <label class="row"><span>Provider spoof fallback</span>
-        <input type="checkbox" class="flag" data-flag="16"></label>
-      <label class="row"><span>Spoof fingerprint in all apps</span>
-        <input type="checkbox" class="flag" data-flag="32"></label>
-      <div class="row">
-        <span>Attestation mode</span>
-        <select id="modeSelect">
-          <option value="auto">Auto (detect TEE)</option>
-          <option value="leaf">Leaf hack</option>
-          <option value="generate">Generate (TEE broken)</option>
-        </select>
-      </div>
-      <div class="row">
-        <span>Fingerprint mode</span>
-        <select id="spoofMode">
-          <option value="pif">PIF — integrity only (recommended)</option>
-          <option value="store">Store — also spoof Play Store (app availability)</option>
-          <option value="global">Global — all apps except Play Store</option>
-        </select>
-      </div>
-      <p class="hint" style="text-align:left">
-        Store mode makes the Play Store see the spoofed device, which changes app search /
-        availability (e.g. Pixel-only or region-filtered apps). Clear Play Store data once
-        after switching, then search again.
-      </p>
-      <label class="row"><span>Debug logging</span>
-        <input type="checkbox" id="debugToggle"></label>
-    </details>
-
-    <details class="sub">
-      <summary>Keybox</summary>
-      <div id="keyboxList"></div>
-      <div class="grid">
-        <button class="action" id="btnImportKeybox">Import keybox</button>
-        <button class="action" id="btnValidateKeybox">Validate (offline)</button>
-      </div>
-    </details>
-
-    <details class="sub">
-      <summary>Profile</summary>
-      <textarea id="profileText" rows="7" spellcheck="false"></textarea>
-      <div class="grid">
-        <button class="action" id="btnProfileApply">Apply profile</button>
-        <button class="action" id="btnDefaultProfile">Load bundled</button>
-        <button class="action" id="btnProfilePatch">Set patch date</button>
-        <button class="action" id="btnProfileImport">Import file</button>
-      </div>
-    </details>
-
-    <details class="sub">
-      <summary>Targets</summary>
-      <div id="ruleChips" class="chips"></div>
-      <div class="row">
-        <input type="text" id="ruleInput" placeholder="package or package:process">
-        <button class="mini" id="btnAddRule">Add</button>
-      </div>
-      <input type="text" id="appSearch" placeholder="Search installed apps…">
-      <div id="appList" class="app-list"></div>
-      <button class="action" id="btnSaveTargets">Save targets</button>
-    </details>
-
-    <details class="sub">
-      <summary>Hook</summary>
-      <div class="grid">
-        <button class="action" id="btnInstallHook">Install / update hook</button>
-        <button class="action" id="btnRemoveHook">Remove hook</button>
-        <button class="action" id="btnRestart">Restart GMS</button>
-        <button class="action" id="btnKillPlay">Restart GMS + clear Play</button>
-      </div>
-      <label class="row"><span>Disable ADB &amp; developer options</span>
-        <input type="checkbox" id="adbToggle"></label>
-    </details>
-
-    <details class="sub">
-      <summary>Diagnostics</summary>
-      <div class="grid">
-        <button class="action" id="btnSelfTest">Framework self-test</button>
-        <button class="action" id="btnHookTest">Hook live test</button>
-        <button class="action" id="btnCheckRomSignature">ROM signature</button>
-        <button class="action" id="btnCollectLogs">Collect logcat</button>
-        <button class="action" id="btnExportBundle">Export debug bundle</button>
-      </div>
-      <pre id="selfTestResult" class="out" hidden></pre>
-      <div class="card-title" style="margin-top:14px">Framework events</div>
-      <pre id="eventsList" class="out" hidden></pre>
-      <div class="muted" id="debugState" style="margin-top:8px"></div>
-    </details>
-
-    <details class="sub">
-      <summary>Configuration</summary>
-      <div class="grid">
-        <button class="action" id="btnExport">Export config</button>
-        <button class="action" id="btnImport">Import config</button>
-      </div>
-      <textarea id="ioText" rows="6" spellcheck="false"
-        placeholder="Exported configuration appears here; paste one and press Import."></textarea>
-    </details>
-
-    <p class="muted" style="margin:14px 0 0">
-      Farewell-PIF 1.9.1 — rootless Play Integrity for MIUI 14 / Android 12 (surya).
-      Hooks live in framework.jar; no root, no modules, no Zygisk. Keybox is user supplied.
-      Not affiliated with Google.
+    <div class="grid">
+      <button class="action" id="btnDiagnose">Run diagnostics</button>
+      <button class="action" id="btnRestart">Restart Play</button>
+      <button class="action" id="btnRemoveHook">Remove hook</button>
+      <button class="action" id="btnExportBundle">Export debug bundle</button>
+    </div>
+    <pre id="diagOut" class="out" hidden></pre>
+    <p class="muted" style="margin-top:12px">
+      Farewell-PIF 1.9.2 — no root, no modules, no Zygisk. Keybox is user supplied;
+      PIF mode works without one. Not affiliated with Google.
     </p>
   </div>
 </details>

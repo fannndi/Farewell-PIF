@@ -93,7 +93,7 @@ final class Attestation {
 
     /** Patch a real TEE leaf (keeps its public key, serial, subject, validity). */
     static byte[] forgeLeaf(X509Certificate real, Keybox.Entry kb, Config.Snapshot cfg,
-                            byte[] challenge, boolean idsRequested) {
+                            byte[] challenge, boolean idsRequested, KeyParams params) {
         try {
             org.json.JSONObject profile = cfg.profileFor(Config.currentPackage());
             byte[] forgedExt;
@@ -103,7 +103,7 @@ final class Attestation {
                 forgedExt = transformExtension(value, cfg, profile);
                 if (forgedExt == null) return null;
             } else {
-                forgedExt = buildKeyDescription(challenge, cfg, profile, idsRequested);
+                forgedExt = buildKeyDescription(challenge, cfg, profile, idsRequested, params);
                 if (forgedExt == null) return null;
             }
             return resignLeaf(real, kb, forgedExt, false, null);
@@ -115,15 +115,88 @@ final class Attestation {
 
     /** Build a brand new leaf for a software public key (TEE broken / generate mode). */
     static byte[] forgeSoftwareLeaf(PublicKey publicKey, Keybox.Entry kb, Config.Snapshot cfg,
-                                    byte[] challenge, boolean idsRequested) {
+                                    byte[] challenge, boolean idsRequested, KeyParams params) {
         try {
             org.json.JSONObject profile = cfg.profileFor(Config.currentPackage());
-            byte[] forgedExt = buildKeyDescription(challenge, cfg, profile, idsRequested);
+            byte[] forgedExt = buildKeyDescription(challenge, cfg, profile, idsRequested, params);
             if (forgedExt == null) return null;
             return resignLeaf(null, kb, forgedExt, true, publicKey);
         } catch (Throwable t) {
             Config.log("forgeSoftwareLeaf failed", t);
             return null;
+        }
+    }
+
+    /**
+     * Key characteristics from the generation request, emitted like stock Android does.
+     * TEESimulator-RS writes purpose/algorithm/keySize/digest/curve/origin into the record;
+     * omitting them makes the attestation look unlike a real TEE one.
+     */
+    static final class KeyParams {
+        static final KeyParams DEFAULT_EC = new KeyParams(
+                new int[]{2, 3}, 3, 256, new int[]{4}, Integer.valueOf(1), true);
+
+        final int[] purposes;
+        final int algorithm;
+        final int keySize;
+        final int[] digests;
+        final Integer ecCurve;
+        final boolean noAuthRequired;
+
+        KeyParams(int[] purposes, int algorithm, int keySize, int[] digests,
+                  Integer ecCurve, boolean noAuthRequired) {
+            this.purposes = purposes;
+            this.algorithm = algorithm;
+            this.keySize = keySize;
+            this.digests = digests;
+            this.ecCurve = ecCurve;
+            this.noAuthRequired = noAuthRequired;
+        }
+
+        static KeyParams from(android.security.keystore.KeyGenParameterSpec spec,
+                              int kmAlgorithm, int keySize) {
+            int[] purposes = spec != null ? mapPurposes(spec.getPurposes()) : null;
+            int[] digests = spec != null ? mapDigests(spec.getDigests()) : null;
+            Boolean noAuth = spec != null
+                    ? Boolean.valueOf(!spec.isUserAuthenticationRequired()) : Boolean.TRUE;
+            if (purposes == null || purposes.length == 0) purposes = new int[]{2, 3};
+            if (digests == null || digests.length == 0) digests = new int[]{4};
+            Integer curve = kmAlgorithm == 3 ? Integer.valueOf(1) : null; // P-256
+            return new KeyParams(purposes, kmAlgorithm, keySize, digests, curve,
+                    noAuth.booleanValue());
+        }
+
+        /** KeyProperties purpose bits -> KeyMint KeyPurpose enum values. */
+        private static int[] mapPurposes(int bits) {
+            java.util.List<Integer> out = new java.util.ArrayList<Integer>();
+            int[] flags = {1, 2, 4, 8, 32, 64, 128};
+            int[] values = {0, 1, 2, 3, 4, 5, 6};
+            for (int i = 0; i < flags.length; i++) {
+                if ((bits & flags[i]) != 0) out.add(Integer.valueOf(values[i]));
+            }
+            int[] result = new int[out.size()];
+            for (int i = 0; i < result.length; i++) result[i] = out.get(i).intValue();
+            return result;
+        }
+
+        /** KeyProperties digest names -> KeyMint Digest enum values. */
+        private static int[] mapDigests(String[] names) {
+            if (names == null) return null;
+            java.util.List<Integer> out = new java.util.ArrayList<Integer>();
+            for (String name : names) {
+                if (name == null) continue;
+                switch (name) {
+                    case "SHA-1": out.add(Integer.valueOf(2)); break;
+                    case "SHA-224": out.add(Integer.valueOf(3)); break;
+                    case "SHA-256": out.add(Integer.valueOf(4)); break;
+                    case "SHA-384": out.add(Integer.valueOf(5)); break;
+                    case "SHA-512": out.add(Integer.valueOf(6)); break;
+                    default: break;
+                }
+            }
+            int[] result = new int[out.size()];
+            for (int i = 0; i < result.length; i++) result[i] = out.get(i).intValue();
+            return result;
         }
     }
 
@@ -337,7 +410,8 @@ final class Attestation {
     }
 
     static byte[] buildKeyDescription(byte[] challenge, Config.Snapshot cfg,
-                                      org.json.JSONObject profile, boolean idsRequested) {
+                                      org.json.JSONObject profile, boolean idsRequested,
+                                      KeyParams params) {
         try {
             int attestationVersion = cfg.attestationVersion();
             int keymasterVersion = cfg.keymasterVersion();
@@ -353,37 +427,60 @@ final class Attestation {
             description.add(new DEROctetString(challenge != null ? challenge : new byte[0]));
             description.add(new DEROctetString(new byte[0]));
 
-            byte[] applicationId = buildApplicationId(cfg);
+            // softwareEnforced: CREATION_DATETIME (701), ATTESTATION_APPLICATION_ID (709).
             ASN1EncodableVector software = new ASN1EncodableVector();
+            software.add(new DERTaggedObject(true, 701,
+                    new ASN1Integer(System.currentTimeMillis())));
+            byte[] applicationId = buildApplicationId(cfg);
             if (applicationId != null) {
                 software.add(new DERTaggedObject(true, TAG_ATTESTATION_APPLICATION_ID,
                         new DEROctetString(applicationId)));
             }
             description.add(new DERSequence(software));
 
+            // teeEnforced, sorted by tag number exactly like stock Android emits it.
             ASN1EncodableVector hardware = new ASN1EncodableVector();
+            if (params != null && params.purposes.length > 0) {
+                ASN1EncodableVector set = new ASN1EncodableVector();
+                for (int purpose : params.purposes) set.add(new ASN1Integer(purpose));
+                hardware.add(new DERTaggedObject(true, 1,
+                        new org.bouncycastle.asn1.DERSet(set)));
+            }
+            if (params != null) {
+                hardware.add(explicitInteger(2, params.algorithm));
+                hardware.add(explicitInteger(3, params.keySize));
+                if (params.digests.length > 0) {
+                    ASN1EncodableVector set = new ASN1EncodableVector();
+                    for (int digest : params.digests) set.add(new ASN1Integer(digest));
+                    hardware.add(new DERTaggedObject(true, 5,
+                            new org.bouncycastle.asn1.DERSet(set)));
+                }
+                if (params.ecCurve != null) {
+                    hardware.add(explicitInteger(10, params.ecCurve.intValue()));
+                }
+                if (params.noAuthRequired) {
+                    hardware.add(new DERTaggedObject(true, 503,
+                            org.bouncycastle.asn1.DERNull.INSTANCE));
+                }
+            }
+            hardware.add(explicitInteger(702, 0));
             hardware.add(overrideFor(TAG_ROOT_OF_TRUST, cfg, profile));
             hardware.add(overrideFor(TAG_OS_VERSION, cfg, profile));
             hardware.add(overrideFor(TAG_OS_PATCHLEVEL, cfg, profile));
-            hardware.add(overrideFor(TAG_VENDOR_PATCHLEVEL, cfg, profile));
-            hardware.add(overrideFor(TAG_BOOT_PATCHLEVEL, cfg, profile));
             if (idsRequested) {
-                int[] idTags = {TAG_ID_BRAND, TAG_ID_DEVICE, TAG_ID_PRODUCT,
-                        TAG_ID_MANUFACTURER, TAG_ID_MODEL};
+                int[] idTags = {TAG_ID_BRAND, TAG_ID_DEVICE, TAG_ID_PRODUCT, TAG_ID_SERIAL,
+                        TAG_ID_IMEI, TAG_ID_MEID, TAG_ID_MANUFACTURER, TAG_ID_MODEL};
                 for (int tag : idTags) {
-                    String value = cfg.devicePropForTag(tag, profile);
-                    if (value != null && !value.isEmpty()) {
-                        hardware.add(explicitOctetString(tag, value));
-                    }
-                }
-                int[] optionalIdTags = {TAG_ID_SERIAL, TAG_ID_IMEI, TAG_ID_MEID};
-                for (int tag : optionalIdTags) {
-                    String value = Config.Snapshot.profileString(profile, idTagName(tag));
+                    String value = tag >= TAG_ID_SERIAL && tag <= TAG_ID_MEID
+                            ? Config.Snapshot.profileString(profile, idTagName(tag))
+                            : cfg.devicePropForTag(tag, profile);
                     if (value != null && !value.isEmpty()) {
                         hardware.add(explicitOctetString(tag, value));
                     }
                 }
             }
+            hardware.add(overrideFor(TAG_VENDOR_PATCHLEVEL, cfg, profile));
+            hardware.add(overrideFor(TAG_BOOT_PATCHLEVEL, cfg, profile));
             description.add(new DERSequence(hardware));
             return new DERSequence(description).getEncoded(ASN1Encoding.DER);
         } catch (Throwable t) {

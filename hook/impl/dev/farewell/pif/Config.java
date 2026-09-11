@@ -45,6 +45,7 @@ final class Config {
     static final int FLAG_SECURE = 4;
     static final int FLAG_SIGNATURE = 8;
     static final int FLAG_PROVIDER = 16;
+    static final int FLAG_ALLAPPS = 32;
 
     static final int MODE_AUTO = 0;
     static final int MODE_LEAF = 1;
@@ -393,16 +394,22 @@ final class Config {
         /**
          * Whether Build/property spoofing applies to this process.
          *
-         * On Android 12L and below, spoofing the Play Store (Vending) fingerprint breaks Play
-         * Integrity / GMS instead of helping, so Vending stays a target for attestation only.
-         * Mirrors PlayIntegrityFork's spoofVendingFinger=0 default for SDK &lt;= 32 (audited from
-         * AlwaysStrong engine.sh).
+         * Default (PIF-compatible): only the configured targets; Play Store keeps its real
+         * fingerprint on SDK <= 32 because spoofing it breaks Play Integrity / GMS.
+         *
+         * With FLAG_ALLAPPS the fingerprint is applied everywhere the hook is loaded (Kaorios-like
+         * global spoof), which also covers Settings / GMS main so the UI shows the forged identity.
          */
         boolean propsFor(String pkg, String process) {
-            if (!isTarget(pkg, process)) return false;
-            if (android.os.Build.VERSION.SDK_INT <= 32
-                    && "com.android.vending".equals(pkg)) {
+            boolean global = (flags & FLAG_ALLAPPS) != 0;
+            // Play Store keeps its real Build even in global mode: spoofing the Vending
+            // fingerprint on SDK <= 32 breaks the Play Integrity express path (audited from
+            // AlwaysStrong/PlayIntegrityFork spoofVendingFinger=0).
+            if (android.os.Build.VERSION.SDK_INT <= 32 && "com.android.vending".equals(pkg)) {
                 return false;
+            }
+            if (!isTarget(pkg, process)) {
+                return global;
             }
             return true;
         }

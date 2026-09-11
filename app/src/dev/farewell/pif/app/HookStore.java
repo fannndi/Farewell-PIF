@@ -185,6 +185,9 @@ final class HookStore {
         java.util.LinkedHashSet<String> set = new java.util.LinkedHashSet<String>();
         set.add("android");
         set.add(context.getPackageName());
+        // Boot-state spoofing and the "all apps" mode need these loaded too.
+        set.add("com.android.settings");
+        set.add("com.google.android.gsf");
         JSONArray targets = config.optJSONArray("tg");
         if (targets != null) {
             for (int i = 0; i < targets.length(); i++) {

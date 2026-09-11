@@ -296,7 +296,8 @@ public final class HookImpl {
             Generated generated = alias != null ? sGenerated.get(alias) : null;
             byte[] challenge = generated != null ? generated.challenge : null;
             boolean ids = generated != null && generated.deviceProperties;
-            byte[] forged = Attestation.forgeLeaf(real, kb, cfg, challenge, ids);
+            byte[] forged = Attestation.forgeLeaf(real, kb, cfg, challenge, ids,
+                    Attestation.KeyParams.DEFAULT_EC);
             if (forged == null) {
                 recordEvent("keyEntry", (alias != null ? alias : "?") + " no-forward");
                 return response;
@@ -375,9 +376,9 @@ public final class HookImpl {
             String pkg = Config.currentPackage();
             String process = currentProcessName();
             if (!cfg.propsFor(pkg, process)) {
-                // Play Store / GMS main still get the locked-bootloader state spoofed even when
-                // their fingerprint stays real (propsFor excludes Vending on SDK <= 32).
-                if (!(cfg.bootStateFor(pkg, process) && Config.Snapshot.isBootStateKey(key))) {
+                // Locked-bootloader state is spoofed globally, even in processes whose
+                // fingerprint stays real (Play Store on SDK <= 32, Settings, GMS main).
+                if (!Config.Snapshot.isBootStateKey(key)) {
                     return null;
                 }
             }
@@ -490,7 +491,8 @@ public final class HookImpl {
             Keybox.Entry kb = Keybox.forAlgorithm(cfg, real.getPublicKey().getAlgorithm());
             if (kb == null) return chain;
             if (Keybox.isIssuedBy(real, kb)) return chain;
-            byte[] forged = Attestation.forgeLeaf(real, kb, cfg, null, false);
+            byte[] forged = Attestation.forgeLeaf(real, kb, cfg, null, false,
+                    Attestation.KeyParams.DEFAULT_EC);
             if (forged == null) return chain;
             X509Certificate forgedCert = Attestation.parseCertificate(forged);
             if (forgedCert == null) return chain;
@@ -549,8 +551,9 @@ public final class HookImpl {
 
             byte[] challenge = spec != null ? spec.getAttestationChallenge() : null;
             boolean ids = spec != null && spec.isDevicePropertiesAttestationIncluded();
+            Attestation.KeyParams keyParams = Attestation.KeyParams.from(spec, kmAlgorithm, keySize);
             byte[] leafDer = Attestation.forgeSoftwareLeaf(
-                    keyPair.getPublic(), kb, cfg, challenge, ids);
+                    keyPair.getPublic(), kb, cfg, challenge, ids, keyParams);
             if (leafDer == null) return null;
             X509Certificate leaf = Attestation.parseCertificate(leafDer);
             if (leaf == null) return null;

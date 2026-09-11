@@ -772,7 +772,7 @@ final class Config {
                 Snapshot snapshot = new Snapshot();
                 snapshot.enabled = object.optInt("en", 0) == 1;
                 if (!snapshot.enabled) return DISABLED;
-                snapshot.debug = object.optInt("dbg", 0) == 1;
+                snapshot.debug = object.optInt("dbg", 0) >= 1;
                 snapshot.verbose = object.optInt("dbg", 0) >= 2;
                 snapshot.flags = object.optInt("fl", FLAG_KEYBOX | FLAG_PROPS);
                 snapshot.mode = parseMode(object.optString("md", "auto"));

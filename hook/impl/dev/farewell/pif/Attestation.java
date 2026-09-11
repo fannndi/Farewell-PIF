@@ -481,9 +481,9 @@ final class Attestation {
                 }
             }
             hardware.add(explicitInteger(702, 0));
-            hardware.add(overrideFor(TAG_ROOT_OF_TRUST, cfg, profile));
-            hardware.add(overrideFor(TAG_OS_VERSION, cfg, profile));
-            hardware.add(overrideFor(TAG_OS_PATCHLEVEL, cfg, profile));
+            addIfPresent(hardware, overrideFor(TAG_ROOT_OF_TRUST, cfg, profile));
+            addIfPresent(hardware, overrideFor(TAG_OS_VERSION, cfg, profile));
+            addIfPresent(hardware, overrideFor(TAG_OS_PATCHLEVEL, cfg, profile));
             if (idsRequested) {
                 int[] idTags = {TAG_ID_BRAND, TAG_ID_DEVICE, TAG_ID_PRODUCT, TAG_ID_SERIAL,
                         TAG_ID_IMEI, TAG_ID_MEID, TAG_ID_MANUFACTURER, TAG_ID_MODEL};
@@ -496,14 +496,19 @@ final class Attestation {
                     }
                 }
             }
-            hardware.add(overrideFor(TAG_VENDOR_PATCHLEVEL, cfg, profile));
-            hardware.add(overrideFor(TAG_BOOT_PATCHLEVEL, cfg, profile));
+            addIfPresent(hardware, overrideFor(TAG_VENDOR_PATCHLEVEL, cfg, profile));
+            addIfPresent(hardware, overrideFor(TAG_BOOT_PATCHLEVEL, cfg, profile));
             description.add(new DERSequence(hardware));
             return new DERSequence(description).getEncoded(ASN1Encoding.DER);
         } catch (Throwable t) {
             Config.log("buildKeyDescription failed", t);
             return null;
         }
+    }
+
+    /** AuthorizationList entries are omitted when the override decided not to report a field. */
+    private static void addIfPresent(ASN1EncodableVector vector, ASN1Encodable element) {
+        if (element != null) vector.add(element);
     }
 
     /**

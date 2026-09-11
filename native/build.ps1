@@ -21,7 +21,12 @@ if (-not (Test-Path $cc)) { throw "clang not found: $cc" }
 $out = Join-Path $root "build\native"
 New-Item -ItemType Directory -Force -Path $out | Out-Null
 
-& $cc -shared -O2 -fPIC -Wall -o (Join-Path $out "libfarewell.so") (Join-Path $root "native\farewell.c") -llog
+& $cc -shared -O2 -fPIC -Wall `
+    -o (Join-Path $out "libfarewell.so") `
+    (Join-Path $root "native\jni.c") `
+    (Join-Path $root "native\hook.c") `
+    (Join-Path $root "native\props.c") `
+    -llog
 if ($LASTEXITCODE -ne 0) { throw "clang failed" }
 
 Copy-Item (Join-Path $out "libfarewell.so") (Join-Path $root "app\assets\libfarewell.so") -Force

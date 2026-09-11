@@ -18,6 +18,7 @@ __pycache__/
 !/tools/adb_debug.py
 !/tools/package.py
 !/tools/verify.py
+!/tools/doctor.py
 
 # reference material: only public data is whitelisted
 /reference/*

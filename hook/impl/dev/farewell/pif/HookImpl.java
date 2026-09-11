@@ -1,96 +1,75 @@
 package dev.farewell.pif;
 
-import android.app.ActivityThread;
 import android.content.Context;
 import android.os.Process;
 import android.security.keystore.KeyGenParameterSpec;
 import android.security.keystore.KeyProperties;
 import android.system.keystore2.KeyEntryResponse;
-import android.util.Log;
 
-import java.lang.reflect.Field;
 import java.security.Key;
 import java.security.KeyPair;
 import java.security.KeyPairGenerator;
 import java.security.KeyStore;
-import java.security.PrivateKey;
 import java.security.cert.Certificate;
 import java.security.cert.X509Certificate;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.atomic.AtomicInteger;
+
+import dev.farewell.pif.Runtime.Generated;
+
+import static dev.farewell.pif.Bridge.asInt;
+import static dev.farewell.pif.Bridge.asString;
+import static dev.farewell.pif.Bridge.call;
+import static dev.farewell.pif.Bridge.callDeclared;
+import static dev.farewell.pif.Bridge.callVoid;
+import static dev.farewell.pif.Bridge.field;
+import static dev.farewell.pif.Bridge.newKeyDescriptor;
+import static dev.farewell.pif.Bridge.set;
+import static dev.farewell.pif.Runtime.GENERATED;
+import static dev.farewell.pif.Runtime.ensureProcessInit;
+import static dev.farewell.pif.Runtime.keyboxApplicable;
+import static dev.farewell.pif.Runtime.teeWorks;
+import static dev.farewell.pif.Runtime.SELF_TEST;
+import static dev.farewell.pif.Runtime.STAT_CERT_ALIAS;
+import static dev.farewell.pif.Runtime.STAT_CHAIN;
+import static dev.farewell.pif.Runtime.STAT_CHAIN_ALIAS;
+import static dev.farewell.pif.Runtime.STAT_IMPORT;
+import static dev.farewell.pif.Runtime.STAT_KEY_ALIAS;
+import static dev.farewell.pif.Runtime.STAT_KEY_ENTRY;
+import static dev.farewell.pif.Runtime.STAT_KEYGEN;
+import static dev.farewell.pif.Runtime.STAT_PROPERTY;
 
 /**
- * Rootless framework entry points.
+ * Rootless framework entry points (facade).
  *
  * Signatures are a build contract with patcher/farewell_patch.py. Do not rename.
+ * Implementation lives in small modules so failures can be diagnosed per feature:
+ *   Bridge        reflective boot-classpath bridge (hidden API)
+ *   Runtime       process state: counters, events, TEE probe, lazy init, target gates
+ *   Props         Build/property/feature spoofing
+ *   Attestation   certificate + key description forging
+ *   Keybox        keybox parsing and selection
+ *   NativeProps   native property hook (libfarewell.so)
  */
 public final class HookImpl {
     public static final String TAG = "FarewellPIF";
 
     private static final AtomicBoolean sProviderInstalled = new AtomicBoolean(false);
-    private static final ConcurrentHashMap<String, Generated> sGenerated =
-            new ConcurrentHashMap<String, Generated>();
-    private static volatile int sTeeState; // 0 unknown, 1 works, 2 broken
-    private static final ThreadLocal<Boolean> sProbeActive = new ThreadLocal<Boolean>();
-    private static final ThreadLocal<Boolean> sSelfTest = new ThreadLocal<Boolean>();
-    private static final AtomicInteger sStatKeygen = new AtomicInteger();
-    private static final AtomicInteger sStatChain = new AtomicInteger();
-    private static final AtomicInteger sStatKeyEntry = new AtomicInteger();
-    private static final AtomicInteger sStatProperty = new AtomicInteger();
-    private static final AtomicInteger sStatImport = new AtomicInteger();
-    private static final AtomicInteger sStatChainAlias = new AtomicInteger();
-    private static final AtomicInteger sStatCertAlias = new AtomicInteger();
-    private static final AtomicInteger sStatKeyAlias = new AtomicInteger();
-    private static final AtomicBoolean sPropsApplied = new AtomicBoolean(false);
-    private static final java.util.ArrayDeque<String> sEvents =
-            new java.util.ArrayDeque<String>();
-    private static final int MAX_EVENTS = 64;
 
     private HookImpl() {
     }
 
     static void recordEvent(String type, String detail) {
-        try {
-            String entry = System.currentTimeMillis() + " " + type + " " + detail;
-            synchronized (sEvents) {
-                if (sEvents.size() >= MAX_EVENTS) sEvents.pollFirst();
-                sEvents.addLast(entry);
-            }
-        } catch (Throwable ignored) {
-        }
+        Runtime.recordEvent(type, detail);
     }
 
     /** Ring buffer of the last framework-side events, as a JSON array of strings. */
     public static String getEvents() {
-        try {
-            org.json.JSONArray array = new org.json.JSONArray();
-            synchronized (sEvents) {
-                for (String event : sEvents) array.put(event);
-            }
-            return array.toString();
-        } catch (Throwable t) {
-            return "[]";
-        }
+        return Runtime.getEvents();
     }
 
     /** Per-process interception counters, for verification over ADB/logcat. */
     public static String getStats() {
-        try {
-            org.json.JSONObject out = new org.json.JSONObject();
-            out.put("keygen", sStatKeygen.get());
-            out.put("chain", sStatChain.get());
-            out.put("keyEntry", sStatKeyEntry.get());
-            out.put("property", sStatProperty.get());
-            out.put("import", sStatImport.get());
-            out.put("chainAlias", sStatChainAlias.get());
-            out.put("certAlias", sStatCertAlias.get());
-            out.put("keyAlias", sStatKeyAlias.get());
-            out.put("tee", sTeeState == 1 ? "works" : sTeeState == 2 ? "broken" : "unknown");
-            return out.toString();
-        } catch (Throwable t) {
-            return "{}";
-        }
+        return Runtime.getStats();
     }
 
     /**
@@ -102,7 +81,7 @@ public final class HookImpl {
         org.json.JSONObject out = new org.json.JSONObject();
         String alias = "farewell_selftest_" + Process.myPid();
         KeyStore keyStore = null;
-        sSelfTest.set(Boolean.TRUE);
+        SELF_TEST.set(Boolean.TRUE);
         try {
             Config.Snapshot cfg = Config.get();
             out.put("enabled", cfg.enabled);
@@ -127,9 +106,9 @@ public final class HookImpl {
             KeyPair pair = generator.generateKeyPair();
             out.put("keygen", pair != null && pair.getPrivate() != null);
 
-            int chainBefore = sStatChainAlias.get();
+            int chainBefore = STAT_CHAIN_ALIAS.get();
             java.security.cert.Certificate[] chain = keyStore.getCertificateChain(alias);
-            out.put("chainDelta", sStatChainAlias.get() - chainBefore);
+            out.put("chainDelta", STAT_CHAIN_ALIAS.get() - chainBefore);
             out.put("chainLength", chain != null ? chain.length : 0);
             try {
                 java.security.cert.Certificate cert = keyStore.getCertificate(alias);
@@ -174,7 +153,7 @@ public final class HookImpl {
             } catch (Throwable ignored) {
             }
         } finally {
-            sSelfTest.remove();
+            SELF_TEST.remove();
             try {
                 if (keyStore == null) {
                     keyStore = KeyStore.getInstance("AndroidKeyStore");
@@ -185,21 +164,6 @@ public final class HookImpl {
             }
         }
         return out.toString();
-    }
-
-    static final class Generated {
-        final PrivateKey privateKey;
-        final X509Certificate[] chain;
-        final byte[] challenge;
-        final boolean deviceProperties;
-
-        Generated(PrivateKey privateKey, X509Certificate[] chain, byte[] challenge,
-                  boolean deviceProperties) {
-            this.privateKey = privateKey;
-            this.chain = chain;
-            this.challenge = challenge;
-            this.deviceProperties = deviceProperties;
-        }
     }
 
     /** Called from Instrumentation.newApplication(...) for every app process. */
@@ -218,37 +182,6 @@ public final class HookImpl {
             installProviderOnce(cfg);
         } catch (Throwable t) {
             Config.log("initContext failed", t);
-        }
-    }
-
-    /**
-     * Applies the Build/signature spoof exactly once per process.
-     *
-     * initContext() is a one-shot call from Instrumentation and can be skipped when the
-     * bootstrap gate is not readable yet in a fresh process, which left GMS/DroidGuard with the
-     * real POCO fingerprint and no MEETS_DEVICE_INTEGRITY. Every hook entry point calls this
-     * lazily instead, before any value is read.
-     */
-    static void ensureProcessInit() {
-        if (sPropsApplied.get()) return;
-        try {
-            Config.Snapshot cfg = Config.get();
-            if (cfg == null || !cfg.enabled) return;
-            String pkg = Config.currentPackage();
-            if (pkg == null) return;
-            String process = currentProcessName();
-            if (!cfg.propsFor(pkg, process)) {
-                sPropsApplied.set(true);
-                return;
-            }
-            if (!sPropsApplied.compareAndSet(false, true)) return;
-            Props.applyBuildFields(cfg.profileFor(pkg));
-            if (cfg.signatureSpoof()) Props.installSignatureSpoof();
-            NativeProps.enableFrom(cfg);
-            if (cfg.debug) debug("props applied " + pkg + ":" + process);
-        } catch (Throwable t) {
-            sPropsApplied.set(false);
-            Config.log("ensureProcessInit failed", t);
         }
     }
 
@@ -294,7 +227,7 @@ public final class HookImpl {
             if (kb == null) return response;
             Object keyDescriptor = field(metadata, "key");
             String alias = keyDescriptor != null ? asString(field(keyDescriptor, "alias")) : null;
-            Generated generated = alias != null ? sGenerated.get(alias) : null;
+            Generated generated = alias != null ? GENERATED.get(alias) : null;
             byte[] challenge = generated != null ? generated.challenge : null;
             boolean ids = generated != null && generated.deviceProperties;
             byte[] forged = Attestation.forgeLeaf(real, kb, cfg, challenge, ids,
@@ -305,7 +238,7 @@ public final class HookImpl {
             }
             set(metadata, "certificate", forged);
             set(metadata, "certificateChain", kb.chainBytes());
-            sStatKeyEntry.incrementAndGet();
+            STAT_KEY_ENTRY.incrementAndGet();
             recordEvent("keyEntry", (alias != null ? alias : "?") + " forged alg=" + kb.algorithm);
             return response;
         } catch (Throwable t) {
@@ -319,9 +252,9 @@ public final class HookImpl {
     public static Certificate[] certificateChainForAlias(String alias) {
         try {
             ensureProcessInit();
-            sStatChainAlias.incrementAndGet();
+            STAT_CHAIN_ALIAS.incrementAndGet();
             if (alias == null) return null;
-            Generated generated = sGenerated.get(alias);
+            Generated generated = GENERATED.get(alias);
             if (generated == null) return null;
             X509Certificate[] chain = generated.chain;
             Certificate[] result = chain != null ? chain.clone() : null;
@@ -338,9 +271,9 @@ public final class HookImpl {
     public static Key softwareKeyForAlias(String alias) {
         try {
             ensureProcessInit();
-            sStatKeyAlias.incrementAndGet();
+            STAT_KEY_ALIAS.incrementAndGet();
             if (alias == null) return null;
-            Generated generated = sGenerated.get(alias);
+            Generated generated = GENERATED.get(alias);
             if (generated != null && generated.privateKey != null && Config.get().debug) {
                 debug("key served " + alias);
             }
@@ -354,9 +287,9 @@ public final class HookImpl {
     public static Certificate certificateForAlias(String alias) {
         try {
             ensureProcessInit();
-            sStatCertAlias.incrementAndGet();
+            STAT_CERT_ALIAS.incrementAndGet();
             if (alias == null) return null;
-            Generated generated = sGenerated.get(alias);
+            Generated generated = GENERATED.get(alias);
             if (generated == null || generated.chain == null || generated.chain.length == 0) {
                 return null;
             }
@@ -388,7 +321,7 @@ public final class HookImpl {
                 // PIFork's verboseLogs: shows every property DroidGuard checks.
                 debug("prop " + key + " -> " + (value != null ? value : "<passthrough>"));
             }
-            if (value != null) sStatProperty.incrementAndGet();
+            if (value != null) STAT_PROPERTY.incrementAndGet();
             return value != null ? value : null;
         } catch (Throwable t) {
             return null;
@@ -448,7 +381,7 @@ public final class HookImpl {
             out.put("attestationVersion", cfg.attestationVersion());
             out.put("keymasterVersion", cfg.keymasterVersion());
             out.put("fingerprint", cfg.profileString("FINGERPRINT"));
-            out.put("tee", sTeeState == 1 ? "works" : sTeeState == 2 ? "broken" : "unknown");
+            out.put("tee", Runtime.teeStateName());
             org.json.JSONArray keyboxes = new org.json.JSONArray();
             java.util.List<Keybox.Entry> entries = Keybox.parseAll(cfg.keyboxList);
             if (entries != null) {
@@ -504,7 +437,7 @@ public final class HookImpl {
             X509Certificate[] out = new X509Certificate[kb.chain.length + 1];
             out[0] = forgedCert;
             System.arraycopy(kb.chain, 0, out, 1, kb.chain.length);
-            sStatChain.incrementAndGet();
+            STAT_CHAIN.incrementAndGet();
             recordEvent("chain", "forged alg=" + kb.algorithm);
             return out;
         } catch (Throwable t) {
@@ -526,7 +459,7 @@ public final class HookImpl {
             Config.Snapshot cfg = Config.get();
             if (!cfg.enabled || !cfg.keyboxEnabled()) return null;
             if (!keyboxApplicable(cfg)) return null;
-            if (Boolean.TRUE.equals(sProbeActive.get())) {
+            if (Boolean.TRUE.equals(Runtime.PROBE_ACTIVE.get())) {
                 // Inside the TEE probe: bypass the hook so the genuine keystore path runs and the
                 // probe measures real hardware behaviour (including attestation refusal).
                 return null;
@@ -547,34 +480,48 @@ public final class HookImpl {
             int kmAlgorithm = asInt(field(spi, "mKeymasterAlgorithm"), 3);
             int keySize = asInt(field(spi, "mKeySizeBits"), kmAlgorithm == 3 ? 256 : 2048);
             Object exponentObj = field(spi, "mRSAPublicExponent");
+            recordEvent("keygen", "fields alias=" + alias + " alg=" + kmAlgorithm
+                    + " size=" + keySize);
 
             KeyPair keyPair = generateKeyPair(kmAlgorithm, keySize, exponentObj);
-            if (keyPair == null) return null;
+            if (keyPair == null) {
+                recordEvent("keygen", "gen-null");
+                return null;
+            }
 
             Keybox.Entry kb = Keybox.forAlgorithm(cfg, kmAlgorithm == 3 ? "EC" : "RSA");
-            if (kb == null) return null;
+            if (kb == null) {
+                recordEvent("keygen", "kb-null");
+                return null;
+            }
 
             byte[] challenge = spec != null ? spec.getAttestationChallenge() : null;
             boolean ids = spec != null && spec.isDevicePropertiesAttestationIncluded();
             Attestation.KeyParams keyParams = Attestation.KeyParams.from(spec, kmAlgorithm, keySize);
             byte[] leafDer = Attestation.forgeSoftwareLeaf(
                     keyPair.getPublic(), kb, cfg, challenge, ids, keyParams);
-            if (leafDer == null) return null;
+            if (leafDer == null) {
+                recordEvent("keygen", "forge-null");
+                return null;
+            }
             X509Certificate leaf = Attestation.parseCertificate(leafDer);
-            if (leaf == null) return null;
+            if (leaf == null) {
+                recordEvent("keygen", "leaf-null");
+                return null;
+            }
 
             X509Certificate[] chain = new X509Certificate[kb.chain.length + 1];
             chain[0] = leaf;
             System.arraycopy(kb.chain, 0, chain, 1, kb.chain.length);
             if (alias != null) {
-                sGenerated.put(alias, new Generated(
+                GENERATED.put(alias, new Generated(
                         keyPair.getPrivate(), chain, challenge, ids));
             }
             byte[] chainDer = chainBytes(chain);
             if (alias != null && chainDer != null) {
                 tryKeystoreImport(spi, keyPair, alias, leafDer, chainDer);
             }
-            sStatKeygen.incrementAndGet();
+            STAT_KEYGEN.incrementAndGet();
             recordEvent("keygen", "generated alias=" + alias + " alg="
                     + (kmAlgorithm == 3 ? "EC" : "RSA"));
             if (cfg.debug) HookImpl.debug("generated software key for " + alias);
@@ -594,12 +541,6 @@ public final class HookImpl {
         } catch (Throwable t) {
             return false;
         }
-    }
-
-    private static boolean keyboxApplicable(Config.Snapshot cfg) {
-        if (cfg == null || !cfg.enabled || !cfg.keyboxEnabled()) return false;
-        if (Boolean.TRUE.equals(sSelfTest.get())) return true;
-        return cfg.attestationFor(Config.currentPackage(), currentProcessName());
     }
 
     private static byte[] chainBytes(java.security.cert.Certificate[] chain) {
@@ -667,45 +608,10 @@ public final class HookImpl {
                             android.system.keystore2.KeyDescriptor.class, byte[].class, byte[].class},
                     descriptor, leafDer, chainDer);
             recordEvent("import", "keystore import ok alias=" + alias);
-            sStatImport.incrementAndGet();
+            STAT_IMPORT.incrementAndGet();
             if (Config.get().debug) HookImpl.debug("software key imported into keystore");
         } catch (Throwable t) {
             Config.log("keystore import skipped", t);
-        }
-    }
-
-    private static boolean teeWorks() {
-        if (Boolean.TRUE.equals(sProbeActive.get())) return true;
-        int state = sTeeState;
-        if (state != 0) return state == 1;
-        synchronized (HookImpl.class) {
-            if (sTeeState != 0) return sTeeState == 1;
-            boolean works = false;
-            String alias = "farewell_probe_" + Process.myPid();
-            sProbeActive.set(Boolean.TRUE);
-            try {
-                KeyPairGenerator generator = KeyPairGenerator.getInstance("EC", "AndroidKeyStore");
-                KeyGenParameterSpec spec = new KeyGenParameterSpec.Builder(
-                        alias, KeyProperties.PURPOSE_SIGN)
-                        .setAttestationChallenge(new byte[16])
-                        .build();
-                generator.initialize(spec);
-                KeyPair keyPair = generator.generateKeyPair();
-                works = keyPair != null && keyPair.getPrivate() != null;
-            } catch (Throwable t) {
-                works = false;
-            } finally {
-                sProbeActive.remove();
-            }
-            try {
-                KeyStore keyStore = KeyStore.getInstance("AndroidKeyStore");
-                keyStore.load(null);
-                keyStore.deleteEntry(alias);
-            } catch (Throwable ignored) {
-            }
-            sTeeState = works ? 1 : 2;
-            recordEvent("teeProbe", works ? "works" : "broken");
-            return works;
         }
     }
 
@@ -729,100 +635,6 @@ public final class HookImpl {
         }
     }
 
-    /**
-     * Field access goes through the bootstrap when available: the impl dex is loaded in-memory and
-     * counts as untrusted for hidden API enforcement, so blacklisted members (mEntryAlias, mSpec,
-     * ...) cannot be reflected on from here. The boot-classpath bridge is exempt.
-     */
-    private static Object field(Object target, String name) {
-        if (target == null) return null;
-        try {
-            Class<?> hook = Class.forName("dev.farewell.pif.FarewellHook");
-            Object value = hook.getMethod("getField", Object.class, String.class)
-                    .invoke(null, target, name);
-            if (value != null) return value;
-        } catch (Throwable ignored) {
-        }
-        Class<?> type = target.getClass();
-        while (type != null) {
-            try {
-                Field field = type.getDeclaredField(name);
-                field.setAccessible(true);
-                return field.get(target);
-            } catch (NoSuchFieldException ignored) {
-                type = type.getSuperclass();
-            } catch (Throwable t) {
-                Config.logOnce("field " + name + " blocked: " + t);
-                return null;
-            }
-        }
-        return null;
-    }
-
-    private static String asString(Object value) {
-        return value instanceof String ? (String) value : null;
-    }
-
-    /** Writes a field through the boot-classpath bridge (hidden API exempt). */
-    private static boolean set(Object target, String name, Object value) {
-        try {
-            Class<?> hook = Class.forName("dev.farewell.pif.FarewellHook");
-            Object result = hook.getMethod("setField", Object.class, String.class, Object.class)
-                    .invoke(null, target, name, value);
-            return Boolean.TRUE.equals(result);
-        } catch (Throwable ignored) {
-            return false;
-        }
-    }
-
-    /** Invokes a public method through the boot-classpath bridge. */
-    private static Object call(Object target, String name, Class<?>[] types, Object... args) {
-        try {
-            Class<?> hook = Class.forName("dev.farewell.pif.FarewellHook");
-            return hook.getMethod("invokeMethod", Object.class, String.class,
-                    Class[].class, Object[].class).invoke(null, target, name, types, args);
-        } catch (Throwable ignored) {
-            return null;
-        }
-    }
-
-    /** Invokes a declared (possibly inherited) method through the boot-classpath bridge. */
-    private static Object callDeclared(Object target, String name, Class<?>[] types, Object... args) {
-        try {
-            Class<?> hook = Class.forName("dev.farewell.pif.FarewellHook");
-            return hook.getMethod("invokeDeclared", Object.class, String.class,
-                    Class[].class, Object[].class).invoke(null, target, name, types, args);
-        } catch (Throwable ignored) {
-            return null;
-        }
-    }
-
-    /** Invokes a void method through the bridge, reporting whether it succeeded. */
-    private static boolean callVoid(Object target, String name, Class<?>[] types, Object... args) {
-        try {
-            Class<?> hook = Class.forName("dev.farewell.pif.FarewellHook");
-            Object result = hook.getMethod("tryInvoke", Object.class, String.class,
-                    Class[].class, Object[].class).invoke(null, target, name, types, args);
-            return Boolean.TRUE.equals(result);
-        } catch (Throwable ignored) {
-            return false;
-        }
-    }
-
-    private static Object newKeyDescriptor(int domain, long namespace, String alias) {
-        try {
-            Class<?> hook = Class.forName("dev.farewell.pif.FarewellHook");
-            return hook.getMethod("newKeyDescriptor", int.class, long.class, String.class)
-                    .invoke(null, Integer.valueOf(domain), Long.valueOf(namespace), alias);
-        } catch (Throwable ignored) {
-            return null;
-        }
-    }
-
-    private static int asInt(Object value, int fallback) {
-        return value instanceof Integer ? ((Integer) value).intValue() : fallback;
-    }
-
     private static void installProviderOnce(Config.Snapshot cfg) {
         if (!cfg.providerSpoof()) return;
         if (!sProviderInstalled.compareAndSet(false, true)) return;
@@ -834,22 +646,10 @@ public final class HookImpl {
     }
 
     static String currentProcessName() {
-        try {
-            String name = ActivityThread.currentProcessName();
-            if (name != null) return name;
-        } catch (Throwable ignored) {
-        }
-        try {
-            return ActivityThread.currentPackageName();
-        } catch (Throwable ignored) {
-        }
-        return null;
+        return Runtime.currentProcessName();
     }
 
     static void debug(String message) {
-        try {
-            Log.d(TAG, message);
-        } catch (Throwable ignored) {
-        }
+        Runtime.debug(message);
     }
 }

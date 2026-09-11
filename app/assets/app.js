@@ -121,6 +121,8 @@ function renderAll(state) {
     box.checked = ((config.fl || 0) & Number(box.dataset.flag)) !== 0;
   });
   $("modeSelect").value = config.md || "auto";
+  const flags = Number(config.fl) || 0;
+  $("spoofMode").value = (flags & 64) ? "store" : (flags & 32) ? "global" : "pif";
   $("debugToggle").checked = Number(config.dbg) === 1;
 
   const profileField = $("profileText");
@@ -324,6 +326,20 @@ function wire() {
   $("modeSelect").addEventListener("change", () => {
     config.md = $("modeSelect").value;
     saveConfig();
+  });
+  $("spoofMode").addEventListener("change", () => {
+    let flags = Number(config.fl) || 0;
+    flags |= 3;
+    flags &= ~(32 | 64);
+    const mode = $("spoofMode").value;
+    if (mode === "store") flags |= 64;
+    if (mode === "global") flags |= 32;
+    config.fl = flags;
+    saveConfig();
+    renderAll(JSON.parse(fsp.getState()));
+    toast(mode === "pif" ? "PIF mode: fingerprint goes to DroidGuard only"
+      : mode === "store" ? "Store mode: Play Store sees the spoofed device"
+      : "Global mode: fingerprint in all apps");
   });
   $("debugToggle").addEventListener("change", () => {
     config.dbg = $("debugToggle").checked ? 1 : 0;

@@ -45,6 +45,20 @@ provider not up yet) is never cached, a deny is retried after 5 s, and `initCont
 - `tools/verify.py` runs the whole verification matrix over ADB; the app exposes the same checks as
   the *Framework self-test* and *Hook live test* buttons and in the exported debug bundle.
 
+## Fingerprint modes
+
+The app exposes three fingerprint policies (`fl` bits 32/64):
+
+| Mode | Flags | Fingerprint reaches | Use for |
+|---|---|---|---|
+| **PIF** (default) | 3 | DroidGuard only | Play Integrity, safest |
+| **Store** | 3+64 | DroidGuard + Play Store | app search/availability changes (Play Store device profile), e.g. apps hidden on the stock model |
+| **Global** | 3+32 | every process except Play Store | showing the spoofed identity system-wide |
+
+Store mode is PIFork's `spoofVendingFinger`. The Play Store caches its device profile, so clear
+Play Store data once after switching, then search again. Store mode can disturb Play Integrity
+verdicts on SDK <= 32; switch back to PIF mode for integrity checks.
+
 ## Native layer ("internal zygisk", no root)
 
 Java hooks cannot reach native readers (DroidGuard's VM, libc `__system_property_get`), which is

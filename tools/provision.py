@@ -45,7 +45,8 @@ LEGACY_KEYS = [
     "farewell_features", "farewell_debug",
 ]
 
-FLAG_BITS = {"props": 1, "keybox": 2, "secure": 4, "signature": 8, "provider": 16}
+FLAG_BITS = {"props": 1, "keybox": 2, "secure": 4, "signature": 8, "provider": 16,
+             "allapps": 32, "vending": 64}
 
 XOR_KEY = bytes([
     0x46, 0x61, 0x72, 0x65, 0x77, 0x65, 0x6C, 0x6C,

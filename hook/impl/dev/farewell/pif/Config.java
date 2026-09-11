@@ -46,6 +46,7 @@ final class Config {
     static final int FLAG_SIGNATURE = 8;
     static final int FLAG_PROVIDER = 16;
     static final int FLAG_ALLAPPS = 32;
+    static final int FLAG_VENDING = 64;
 
     static final int MODE_AUTO = 0;
     static final int MODE_LEAF = 1;
@@ -408,19 +409,18 @@ final class Config {
         /**
          * Whether Build/property spoofing applies to this process.
          *
-         * Default (PIF-compatible): only the configured targets; Play Store keeps its real
-         * fingerprint on SDK <= 32 because spoofing it breaks Play Integrity / GMS.
-         *
-         * With FLAG_ALLAPPS the fingerprint is applied everywhere the hook is loaded (Kaorios-like
-         * global spoof), which also covers Settings / GMS main so the UI shows the forged identity.
+         * Play Store (Vending) rules:
+         * - default: no fingerprint spoofing on SDK &lt;= 32 (breaks Play Integrity)
+         * - FLAG_VENDING: force the fingerprint to Vending too, which changes the Play Store's
+         *   device profile and therefore app availability/search (the "Store mode")
+         * - FLAG_ALLAPPS: every other process, still excluding Vending on SDK &lt;= 32
          */
         boolean propsFor(String pkg, String process) {
             boolean global = (flags & FLAG_ALLAPPS) != 0;
-            // Play Store keeps its real Build even in global mode: spoofing the Vending
-            // fingerprint on SDK <= 32 breaks the Play Integrity express path (audited from
-            // AlwaysStrong/PlayIntegrityFork spoofVendingFinger=0).
-            if (android.os.Build.VERSION.SDK_INT <= 32 && "com.android.vending".equals(pkg)) {
-                return false;
+            boolean vending = (flags & FLAG_VENDING) != 0;
+            if (pkg != null && pkg.equals("com.android.vending")) {
+                if (vending) return true;
+                return global && android.os.Build.VERSION.SDK_INT > 32;
             }
             if (!isTarget(pkg, process)) {
                 return global;

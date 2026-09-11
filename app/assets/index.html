@@ -66,6 +66,19 @@
           <option value="generate">Generate (TEE broken)</option>
         </select>
       </div>
+      <div class="row">
+        <span>Fingerprint mode</span>
+        <select id="spoofMode">
+          <option value="pif">PIF — integrity only (recommended)</option>
+          <option value="store">Store — also spoof Play Store (app availability)</option>
+          <option value="global">Global — all apps except Play Store</option>
+        </select>
+      </div>
+      <p class="hint" style="text-align:left">
+        Store mode makes the Play Store see the spoofed device, which changes app search /
+        availability (e.g. Pixel-only or region-filtered apps). Clear Play Store data once
+        after switching, then search again.
+      </p>
       <label class="row"><span>Debug logging</span>
         <input type="checkbox" id="debugToggle"></label>
     </details>
@@ -140,7 +153,7 @@
     </details>
 
     <p class="muted" style="margin:14px 0 0">
-      Farewell-PIF 1.9.0 — rootless Play Integrity for MIUI 14 / Android 12 (surya).
+      Farewell-PIF 1.9.1 — rootless Play Integrity for MIUI 14 / Android 12 (surya).
       Hooks live in framework.jar; no root, no modules, no Zygisk. Keybox is user supplied.
       Not affiliated with Google.
     </p>

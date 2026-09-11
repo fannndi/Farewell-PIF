@@ -47,7 +47,7 @@ tools/package.py        dist zip (jars, APK, hook.dex, libfarewell.so)
 | `{"bootstrap":true,"impl":false}` | Loader: `FarewellHook.loadImpl` / `readSetting` context path (bootstrap); `dexprobe` op shows the channel. |
 | `keygen:0`, `forge-null` | Attestation/KeyParams (`Attestation.buildKeyDescription`), field reads via `Bridge.getField`. Check `Config.log` with `dbg=1`. |
 | `import ok` missing | `HookImpl.tryKeystoreImport` + `Bridge.callDeclared`/`newKeyDescriptor`. |
-| `chain served (4)` but verdict BASIC/[] | Server-side or identity: keybox revocation, fingerprint mode, verbose props (`dbg=2`), rate limit (do not spam checks). |
+| `chain served (4)` but verdict BASIC/[] | Server-side or identity: keybox root generation (`tools/keybox_check.py`), fingerprint mode, verbose props (`dbg=2`), rate limit (do not spam checks). |
 | Props not spoofed in DroidGuard | `Runtime.ensureProcessInit` -> `Config.propsFor`; check `props applied ... gms.unstable` in logcat. |
 | Native props inactive | `NativeProps.enableFrom` loads `/system/lib64/libfarewell.so`; test with `nativeprobe` op; rebuild with `native/build.ps1`. |
 | Play Store app search unchanged | Store mode (`FLAG_VENDING` bit 64) + clear Play Store data once; `Props` applies the profile to `com.android.vending`. |

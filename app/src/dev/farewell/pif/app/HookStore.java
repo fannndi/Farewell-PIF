@@ -240,7 +240,8 @@ final class HookStore {
 
             String current = getString(context, HOOK_META);
             if (current != null && current.startsWith(shaHex + ":")
-                    && current.endsWith(":" + version)) {
+                    && current.endsWith(":" + version)
+                    && verifyChannel(context, dex, chunks)) {
                 putString(context, HOOK_GATE, gateValue(context, readConfig(context)));
                 JSONObject cached = new JSONObject();
                 cached.put("ok", true);
@@ -252,28 +253,53 @@ final class HookStore {
                 return cached.toString();
             }
 
-            for (int i = 0; i < chunks; i++) {
-                int from = i * HOOK_CHUNK_SIZE;
-                int to = Math.min(dex.length, from + HOOK_CHUNK_SIZE);
-                byte[] part = java.util.Arrays.copyOfRange(dex, from, to);
-                putString(context, HOOK_CHUNK + i,
-                        Base64.encodeToString(xor(part), Base64.NO_WRAP));
-            }
-            for (int i = chunks; i < HOOK_MAX_CHUNKS; i++) {
-                deleteKey(context, HOOK_CHUNK + i);
-            }
-            putString(context, HOOK_META, shaHex + ":" + chunks + ":" + version);
-            putString(context, HOOK_GATE, gateValue(context, readConfig(context)));
+            // MIUI occasionally drops or truncates a Settings.Global write: write the chunks,
+            // read them back, and only publish the meta after the reassembled dex matches.
+            for (int attempt = 0; attempt < 3; attempt++) {
+                for (int i = 0; i < chunks; i++) {
+                    int from = i * HOOK_CHUNK_SIZE;
+                    int to = Math.min(dex.length, from + HOOK_CHUNK_SIZE);
+                    byte[] part = java.util.Arrays.copyOfRange(dex, from, to);
+                    putString(context, HOOK_CHUNK + i,
+                            Base64.encodeToString(xor(part), Base64.NO_WRAP));
+                }
+                for (int i = chunks; i < HOOK_MAX_CHUNKS; i++) {
+                    deleteKey(context, HOOK_CHUNK + i);
+                }
+                if (!verifyChannel(context, dex, chunks)) continue;
+                putString(context, HOOK_META, shaHex + ":" + chunks + ":" + version);
+                putString(context, HOOK_GATE, gateValue(context, readConfig(context)));
 
-            JSONObject out = new JSONObject();
-            out.put("ok", true);
-            out.put("sha", shaHex);
-            out.put("chunks", chunks);
-            out.put("version", version);
-            out.put("size", dex.length);
-            return out.toString();
+                JSONObject out = new JSONObject();
+                out.put("ok", true);
+                out.put("sha", shaHex);
+                out.put("chunks", chunks);
+                out.put("version", version);
+                out.put("size", dex.length);
+                out.put("attempt", attempt + 1);
+                return out.toString();
+            }
+            return "{\"ok\":false,\"error\":\"channel verify failed after 3 attempts\"}";
         } catch (Throwable t) {
             return "{\"ok\":false,\"error\":\"" + t.getMessage() + "\"}";
+        }
+    }
+
+    /** Reassembles the chunk channel and compares it byte-for-byte with the source dex. */
+    private static boolean verifyChannel(Context context, byte[] dex, int chunks) {
+        try {
+            java.io.ByteArrayOutputStream buffer = new java.io.ByteArrayOutputStream();
+            for (int i = 0; i < chunks; i++) {
+                String encoded = getString(context, HOOK_CHUNK + i);
+                if (encoded == null || encoded.isEmpty()) return false;
+                buffer.write(xor(Base64.decode(encoded, Base64.DEFAULT)));
+            }
+            byte[] read = buffer.toByteArray();
+            if (read.length != dex.length) return false;
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            return java.util.Arrays.equals(digest.digest(read), digest.digest(dex));
+        } catch (Throwable t) {
+            return false;
         }
     }
 

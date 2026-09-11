@@ -67,6 +67,8 @@ final class Runtime {
                 if (EVENTS.size() >= MAX_EVENTS) EVENTS.pollFirst();
                 EVENTS.addLast(entry);
             }
+            Config.Snapshot cfg = Config.get();
+            if (cfg != null && cfg.debug) Log.d(HookImpl.TAG, "event " + type + " " + detail);
         } catch (Throwable ignored) {
         }
     }

@@ -100,6 +100,42 @@ looked alive (counters/events/logs) while `KeyStore.getCertificateChain`, `getKe
 original only on null). Regression tests in `tests/test_tools.py` now assert no `if-nez` exists
 in the patcher.
 
+## Channel corruption on MIUI (fixed 2026-09-11, app side)
+
+`HookStore.installHook` used to publish `sys_perf_dex_meta` right after writing the chunks, without
+reading them back. MIUI occasionally drops or truncates one of the (large, base64) `Settings.Global`
+values, so provisioning reported success while the bootstrap later logged:
+
+```
+I FarewellPIF: dex hash mismatch pkg=com.google.android.gms   # hook dead for that process
+```
+
+Fix: after writing, the app reassembles the channel from Settings, compares SHA-256 with the asset
+and retries up to 3 times; the meta is published only after the channel verifies. `op dexprobe`
+reports the state (`shaMatch:true`). Never conclude "hook broken" from a check where the log shows
+`dex hash mismatch` — re-install until `dexprobe` says true.
+
+## DroidGuard event trail (verified on device 2026-09-11)
+
+With `dbg>=1` every `recordEvent` also goes to logcat. A healthy check shows this sequence in the
+real DroidGuard process (`com.google.android.gms.unstable`):
+
+```
+I FarewellPIF: dex loaded v=1.9.2 pkg=com.google.android.gms
+D FarewellPIF: props applied com.google.android.gms:com.google.android.gms.unstable
+D FarewellPIF: event teeProbe broken
+D FarewellPIF: event keygen fields alias=unstable.<hash>.<nonce> alg=3 size=256
+D FarewellPIF: event import keystore import ok alias=unstable.<hash>.<nonce>
+D FarewellPIF: event keygen generated alias=unstable.<hash>.<nonce> alg=EC
+```
+
+Meaning: DroidGuard did generate a fresh attest key, our software-key forge and the keystore2 import
+worked, and the forged chain was served. If instead the server returns **all verdicts red / empty**
+(`[]`), that is Google's rate-limit / anomaly response, not a forge failure: do not spam checks
+(one per 24 h while debugging), and complete the native layer first (see `MODULES.md`, module
+`native`) because DroidGuard's native VM still reads real properties while the old `libfarewell.so`
+lacks the `__system_property_read_callback` hook.
+
 ## Verification matrix (tools/verify.py)
 
 Run after flashing or after any hook/config change:

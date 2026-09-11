@@ -14,6 +14,7 @@ Hasil audit ROM `V14.0.1.0.SJGMIXM` (lihat `out/rom-audit.json`).
 | `/system/system/framework/services.jar` | `out/services.jar` | |
 | `/system_ext/priv-app/FarewellPIF/FarewellPIF.apk` | `out/FarewellPIF.apk` | dir `0755`, file `0644` |
 | `/system_ext/etc/permissions/dev.farewell.pif.xml` | `out/privapp/...xml` | wajib, karena `ro.control_privapp_permissions` tidak diset |
+| `/system/system/lib64/libfarewell.so` | `out/install/system/system/lib64/libfarewell.so` | md5 `d6a572578ef4974bf4948f04e1ad84d3`; dir `0755`, file `0644` |
 | (opsional) `/system/system/build.prop` | — | tambahkan `ro.control_privapp_permissions=` bila boot menolak privapp |
 
 ## 2. AVB / dm-verity (KRITIS)
@@ -40,8 +41,10 @@ Bootloop akibat verity biasanya jatuh ke fastboot/recovery — bisa di-rollback.
    - `keybox #1 ... ok`, `target=true`
    - `tee` = `broken` bila memang begitu → mode harus `generate` (auto mendeteksi).
 4. App → Tools → **Check ROM signature** → harus `releasekey` (signature spoof tidak perlu).
-5. Play Integrity API Checker.
-6. Bila gagal: **Export debug bundle** → `python tools/adb_debug.py --collect` → kirim zip.
+5. Cek native: `adb shell md5sum /system/lib64/libfarewell.so` (harus sama dengan tabel di atas),
+   lalu app op `nativeprobe` → `after='hooked' state=1`.
+6. Play Integrity API Checker.
+7. Bila gagal: **Export debug bundle** → `python tools/adb_debug.py --collect` → kirim zip.
 
 ## 4b. Update hook tanpa repack
 Setelah boot pertama, update logika hook cukup lewat app (**Install / update hook**) atau

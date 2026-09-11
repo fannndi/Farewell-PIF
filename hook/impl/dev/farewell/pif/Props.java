@@ -34,7 +34,7 @@ final class Props {
             "MANUFACTURER", "MODEL", "FINGERPRINT", "BRAND", "PRODUCT", "DEVICE",
             "ID", "INCREMENTAL", "TYPE", "TAGS"
     };
-    private static final String[] VERSION_FIELDS = {"RELEASE", "SECURITY_PATCH", "INCREMENTAL"};
+    private static final String[] VERSION_FIELDS = {"RELEASE", "SECURITY_PATCH"};
 
     private static final AtomicBoolean sSignatureInstalled = new AtomicBoolean(false);
 
@@ -79,14 +79,16 @@ final class Props {
             String value = Config.Snapshot.profileString(profile, name);
             if (value != null) setStaticField(Build.VERSION.class, name, value);
         }
-        // Build.VERSION.DEVICE_INITIAL_SDK_INT is an int field (API 31+).
+        // Build.VERSION.DEVICE_INITIAL_SDK_INT is a hidden/@SystemApi int field: the impl
+        // classloader cannot reflect on it, and DroidGuard reads ro.product.first_api_level
+        // instead (covered by the *api_level property spoof).
         String initialSdk = Config.Snapshot.profileString(profile, "DEVICE_INITIAL_SDK_INT");
         if (initialSdk != null) {
             try {
                 setStaticIntField(Build.VERSION.class, "DEVICE_INITIAL_SDK_INT",
                         Integer.parseInt(initialSdk.trim()));
             } catch (Throwable t) {
-                Config.log("failed to spoof DEVICE_INITIAL_SDK_INT", t);
+                Config.log("DEVICE_INITIAL_SDK_INT is a hidden field, skipped", null);
             }
         }
     }

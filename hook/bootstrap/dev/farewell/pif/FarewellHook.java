@@ -206,6 +206,82 @@ public final class FarewellHook {
         return null;
     }
 
+    /** Writes a field on behalf of the impl dex (hidden API exempt when called from boot classpath). */
+    public static boolean setField(Object target, String name, Object value) {
+        if (target == null || name == null) return false;
+        Class<?> type = target.getClass();
+        while (type != null) {
+            try {
+                java.lang.reflect.Field field = type.getDeclaredField(name);
+                field.setAccessible(true);
+                field.set(target, value);
+                return true;
+            } catch (NoSuchFieldException ignored) {
+                type = type.getSuperclass();
+            } catch (Throwable ignored) {
+                return false;
+            }
+        }
+        return false;
+    }
+
+    /** Invokes a public method on behalf of the impl dex; null on any failure. */
+    public static Object invokeMethod(Object target, String name, Class<?>[] types, Object[] args) {
+        if (target == null || name == null) return null;
+        try {
+            java.lang.reflect.Method method = target.getClass().getMethod(name, types);
+            method.setAccessible(true);
+            return method.invoke(target, args);
+        } catch (Throwable ignored) {
+            return null;
+        }
+    }
+
+    /** Like invokeMethod, but walks the class hierarchy looking for a declared method. */
+    public static Object invokeDeclared(Object target, String name, Class<?>[] types, Object[] args) {
+        if (target == null || name == null) return null;
+        Class<?> type = target.getClass();
+        while (type != null) {
+            try {
+                java.lang.reflect.Method method = type.getDeclaredMethod(name, types);
+                method.setAccessible(true);
+                return method.invoke(target, args);
+            } catch (NoSuchMethodException ignored) {
+                type = type.getSuperclass();
+            } catch (Throwable ignored) {
+                return null;
+            }
+        }
+        return null;
+    }
+
+    /** Invokes a method and reports success, for void methods where null is ambiguous. */
+    public static Boolean tryInvoke(Object target, String name, Class<?>[] types, Object[] args) {
+        if (target == null || name == null) return Boolean.FALSE;
+        try {
+            java.lang.reflect.Method method = target.getClass().getMethod(name, types);
+            method.setAccessible(true);
+            method.invoke(target, args);
+            return Boolean.TRUE;
+        } catch (Throwable ignored) {
+            return Boolean.FALSE;
+        }
+    }
+
+    /** Builds a keystore2 KeyDescriptor in the boot classpath (constructors are hidden API). */
+    public static Object newKeyDescriptor(int domain, long namespace, String alias) {
+        try {
+            android.system.keystore2.KeyDescriptor descriptor =
+                    new android.system.keystore2.KeyDescriptor();
+            descriptor.domain = domain;
+            descriptor.nspace = namespace;
+            descriptor.alias = alias;
+            return descriptor;
+        } catch (Throwable ignored) {
+            return null;
+        }
+    }
+
     // ------------------------------------------------------------------ loader
 
     /** Re-check the runtime dex version; reload when it changed. */

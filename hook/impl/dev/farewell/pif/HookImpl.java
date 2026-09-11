@@ -42,6 +42,7 @@ public final class HookImpl {
     private static final AtomicInteger sStatChainAlias = new AtomicInteger();
     private static final AtomicInteger sStatCertAlias = new AtomicInteger();
     private static final AtomicInteger sStatKeyAlias = new AtomicInteger();
+    private static final AtomicBoolean sPropsApplied = new AtomicBoolean(false);
     private static final java.util.ArrayDeque<String> sEvents =
             new java.util.ArrayDeque<String>();
     private static final int MAX_EVENTS = 64;
@@ -209,13 +210,44 @@ public final class HookImpl {
             if (!cfg.enabled) return;
             String pkg = Config.currentPackage();
             String process = currentProcessName();
+            if (cfg.debug) debug("initContext " + pkg + ":" + process);
             recordEvent("init", pkg + ":" + process
                     + " target=" + cfg.isTarget(pkg, process)
                     + " mode=" + cfg.mode + " flags=" + cfg.flags);
-            Props.onProcessStart(cfg, context, process);
+            ensureProcessInit();
             installProviderOnce(cfg);
         } catch (Throwable t) {
             Config.log("initContext failed", t);
+        }
+    }
+
+    /**
+     * Applies the Build/signature spoof exactly once per process.
+     *
+     * initContext() is a one-shot call from Instrumentation and can be skipped when the
+     * bootstrap gate is not readable yet in a fresh process, which left GMS/DroidGuard with the
+     * real POCO fingerprint and no MEETS_DEVICE_INTEGRITY. Every hook entry point calls this
+     * lazily instead, before any value is read.
+     */
+    static void ensureProcessInit() {
+        if (sPropsApplied.get()) return;
+        try {
+            Config.Snapshot cfg = Config.get();
+            if (cfg == null || !cfg.enabled) return;
+            String pkg = Config.currentPackage();
+            if (pkg == null) return;
+            String process = currentProcessName();
+            if (!cfg.propsFor(pkg, process)) {
+                sPropsApplied.set(true);
+                return;
+            }
+            if (!sPropsApplied.compareAndSet(false, true)) return;
+            Props.applyBuildFields(cfg.profileFor(pkg));
+            if (cfg.signatureSpoof()) Props.installSignatureSpoof();
+            if (cfg.debug) debug("props applied " + pkg + ":" + process);
+        } catch (Throwable t) {
+            sPropsApplied.set(false);
+            Config.log("ensureProcessInit failed", t);
         }
     }
 
@@ -231,6 +263,7 @@ public final class HookImpl {
     /** Called from ApplicationPackageManager.hasSystemFeature(String, int). */
     public static Boolean hasSystemFeature(String name, int version) {
         try {
+            ensureProcessInit();
             Config.Snapshot cfg = Config.get();
             if (!cfg.enabled) return null;
             String pkg = Config.currentPackage();
@@ -245,17 +278,21 @@ public final class HookImpl {
     /** Called from android.security.KeyStore2.getKeyEntry(KeyDescriptor). */
     public static KeyEntryResponse getKeyEntry(KeyEntryResponse response) {
         try {
-            if (response == null || response.metadata == null) return response;
+            ensureProcessInit();
             Config.Snapshot cfg = Config.get();
             if (!keyboxApplicable(cfg)) return response;
+            if (response == null) return response;
+            Object metadata = field(response, "metadata");
+            if (metadata == null) return response;
             Props.reapply();
-            byte[] leaf = response.metadata.certificate;
+            byte[] leaf = (byte[]) field(metadata, "certificate");
             if (leaf == null) return response;
             X509Certificate real = Attestation.parseCertificate(leaf);
             if (real == null) return response;
             Keybox.Entry kb = Keybox.forAlgorithm(cfg, real.getPublicKey().getAlgorithm());
             if (kb == null) return response;
-            String alias = response.metadata.key != null ? response.metadata.key.alias : null;
+            Object keyDescriptor = field(metadata, "key");
+            String alias = keyDescriptor != null ? asString(field(keyDescriptor, "alias")) : null;
             Generated generated = alias != null ? sGenerated.get(alias) : null;
             byte[] challenge = generated != null ? generated.challenge : null;
             boolean ids = generated != null && generated.deviceProperties;
@@ -264,8 +301,8 @@ public final class HookImpl {
                 recordEvent("keyEntry", (alias != null ? alias : "?") + " no-forward");
                 return response;
             }
-            response.metadata.certificate = forged;
-            response.metadata.certificateChain = kb.chainBytes();
+            set(metadata, "certificate", forged);
+            set(metadata, "certificateChain", kb.chainBytes());
             sStatKeyEntry.incrementAndGet();
             recordEvent("keyEntry", (alias != null ? alias : "?") + " forged alg=" + kb.algorithm);
             return response;
@@ -279,12 +316,17 @@ public final class HookImpl {
     /** Called at the start of keystore2.AndroidKeyStoreSpi.engineGetCertificateChain(String). */
     public static Certificate[] certificateChainForAlias(String alias) {
         try {
+            ensureProcessInit();
             sStatChainAlias.incrementAndGet();
             if (alias == null) return null;
             Generated generated = sGenerated.get(alias);
             if (generated == null) return null;
             X509Certificate[] chain = generated.chain;
-            return chain != null ? chain.clone() : null;
+            Certificate[] result = chain != null ? chain.clone() : null;
+            if (result != null && Config.get().debug) {
+                debug("chain served " + alias + " (" + result.length + ")");
+            }
+            return result;
         } catch (Throwable t) {
             return null;
         }
@@ -293,9 +335,13 @@ public final class HookImpl {
     /** Called at the start of keystore2.AndroidKeyStoreSpi.engineGetKey(String, char[]). */
     public static Key softwareKeyForAlias(String alias) {
         try {
+            ensureProcessInit();
             sStatKeyAlias.incrementAndGet();
             if (alias == null) return null;
             Generated generated = sGenerated.get(alias);
+            if (generated != null && generated.privateKey != null && Config.get().debug) {
+                debug("key served " + alias);
+            }
             return generated != null ? generated.privateKey : null;
         } catch (Throwable t) {
             return null;
@@ -305,6 +351,7 @@ public final class HookImpl {
     /** Called at the start of keystore2.AndroidKeyStoreSpi.engineGetCertificate(String). */
     public static Certificate certificateForAlias(String alias) {
         try {
+            ensureProcessInit();
             sStatCertAlias.incrementAndGet();
             if (alias == null) return null;
             Generated generated = sGenerated.get(alias);
@@ -322,9 +369,18 @@ public final class HookImpl {
     /** Called at the start of SystemProperties.get(String) and get(String, String). */
     public static String property(String key, String def) {
         try {
+            ensureProcessInit();
             Config.Snapshot cfg = Config.get();
             if (cfg == null || !cfg.enabled) return null;
-            if (!cfg.propsFor(Config.currentPackage(), currentProcessName())) return null;
+            String pkg = Config.currentPackage();
+            String process = currentProcessName();
+            if (!cfg.propsFor(pkg, process)) {
+                // Play Store / GMS main still get the locked-bootloader state spoofed even when
+                // their fingerprint stays real (propsFor excludes Vending on SDK <= 32).
+                if (!(cfg.bootStateFor(pkg, process) && Config.Snapshot.isBootStateKey(key))) {
+                    return null;
+                }
+            }
             String value = cfg.spoofProperty(key);
             if (value != null) sStatProperty.incrementAndGet();
             return value != null ? value : null;
@@ -459,6 +515,7 @@ public final class HookImpl {
      */
     public static KeyPair softwareKeyPair(Object spi) {
         try {
+            ensureProcessInit();
             Config.Snapshot cfg = Config.get();
             if (!cfg.enabled || !cfg.keyboxEnabled()) return null;
             if (!keyboxApplicable(cfg)) return null;
@@ -523,6 +580,7 @@ public final class HookImpl {
     /** Called from services.jar secure-flag patch points. */
     public static boolean isSecureFlag() {
         try {
+            ensureProcessInit();
             Config.Snapshot cfg = Config.get();
             return cfg.enabled && cfg.secureFlag();
         } catch (Throwable t) {
@@ -563,22 +621,11 @@ public final class HookImpl {
             long namespace = namespaceObject instanceof Number
                     ? ((Number) namespaceObject).longValue() : 0L;
 
-            java.lang.reflect.Method builder = null;
-            Class<?> type = spi.getClass();
-            while (type != null && builder == null) {
-                try {
-                    builder = type.getDeclaredMethod("constructKeyGenerationArguments");
-                } catch (NoSuchMethodException ignored) {
-                    type = type.getSuperclass();
-                }
-            }
-            if (builder == null) return;
-            builder.setAccessible(true);
-            java.util.Collection<?> params = (java.util.Collection<?>) builder.invoke(spi);
-            if (params == null) return;
+            Object params = callDeclared(spi, "constructKeyGenerationArguments", new Class<?>[0]);
+            if (!(params instanceof java.util.Collection)) return;
 
             java.util.List<Object> filtered = new java.util.ArrayList<Object>();
-            for (Object param : params) {
+            for (Object param : (java.util.Collection<?>) params) {
                 Object tagObject = field(param, "tag");
                 if (tagObject instanceof Integer) {
                     int tag = ((Integer) tagObject).intValue();
@@ -588,42 +635,29 @@ public final class HookImpl {
                 filtered.add(param);
             }
 
-            android.system.keystore2.KeyDescriptor descriptor =
-                    new android.system.keystore2.KeyDescriptor();
-            descriptor.domain = 0;
-            descriptor.nspace = namespace;
-            descriptor.alias = alias;
+            Object descriptor = newKeyDescriptor(0, namespace, alias);
+            if (descriptor == null) return;
 
             byte[] pkcs8 = keyPair.getPrivate().getEncoded();
-            java.lang.reflect.Method getLevel = keyStore.getClass()
-                    .getMethod("getSecurityLevel", int.class);
-
             boolean imported = false;
             for (int candidate : new int[]{1, 100, 2}) {
-                Object level;
-                try {
-                    level = getLevel.invoke(keyStore, candidate);
-                } catch (Throwable t) {
-                    continue;
-                }
+                Object level = call(keyStore, "getSecurityLevel", new Class<?>[]{int.class},
+                        Integer.valueOf(candidate));
                 if (level == null) continue;
-                try {
-                    java.lang.reflect.Method importKey = level.getClass().getMethod("importKey",
-                            android.system.keystore2.KeyDescriptor.class,
-                            android.system.keystore2.KeyDescriptor.class,
-                            java.util.Collection.class, int.class, byte[].class);
-                    importKey.invoke(level, descriptor, null, filtered, 0, pkcs8);
+                boolean ok = callVoid(level, "importKey", new Class<?>[]{
+                                android.system.keystore2.KeyDescriptor.class,
+                                android.system.keystore2.KeyDescriptor.class,
+                                java.util.Collection.class, int.class, byte[].class},
+                        descriptor, null, filtered, Integer.valueOf(0), pkcs8);
+                if (ok) {
                     imported = true;
                     break;
-                } catch (Throwable ignored) {
                 }
             }
             if (!imported) return;
-            try {
-                ((android.security.KeyStore2) keyStore)
-                        .updateSubcomponents(descriptor, leafDer, chainDer);
-            } catch (Throwable ignored) {
-            }
+            callVoid(keyStore, "updateSubcomponents", new Class<?>[]{
+                            android.system.keystore2.KeyDescriptor.class, byte[].class, byte[].class},
+                    descriptor, leafDer, chainDer);
             recordEvent("import", "keystore import ok alias=" + alias);
             sStatImport.incrementAndGet();
             if (Config.get().debug) HookImpl.debug("software key imported into keystore");
@@ -719,6 +753,62 @@ public final class HookImpl {
 
     private static String asString(Object value) {
         return value instanceof String ? (String) value : null;
+    }
+
+    /** Writes a field through the boot-classpath bridge (hidden API exempt). */
+    private static boolean set(Object target, String name, Object value) {
+        try {
+            Class<?> hook = Class.forName("dev.farewell.pif.FarewellHook");
+            Object result = hook.getMethod("setField", Object.class, String.class, Object.class)
+                    .invoke(null, target, name, value);
+            return Boolean.TRUE.equals(result);
+        } catch (Throwable ignored) {
+            return false;
+        }
+    }
+
+    /** Invokes a public method through the boot-classpath bridge. */
+    private static Object call(Object target, String name, Class<?>[] types, Object... args) {
+        try {
+            Class<?> hook = Class.forName("dev.farewell.pif.FarewellHook");
+            return hook.getMethod("invokeMethod", Object.class, String.class,
+                    Class[].class, Object[].class).invoke(null, target, name, types, args);
+        } catch (Throwable ignored) {
+            return null;
+        }
+    }
+
+    /** Invokes a declared (possibly inherited) method through the boot-classpath bridge. */
+    private static Object callDeclared(Object target, String name, Class<?>[] types, Object... args) {
+        try {
+            Class<?> hook = Class.forName("dev.farewell.pif.FarewellHook");
+            return hook.getMethod("invokeDeclared", Object.class, String.class,
+                    Class[].class, Object[].class).invoke(null, target, name, types, args);
+        } catch (Throwable ignored) {
+            return null;
+        }
+    }
+
+    /** Invokes a void method through the bridge, reporting whether it succeeded. */
+    private static boolean callVoid(Object target, String name, Class<?>[] types, Object... args) {
+        try {
+            Class<?> hook = Class.forName("dev.farewell.pif.FarewellHook");
+            Object result = hook.getMethod("tryInvoke", Object.class, String.class,
+                    Class[].class, Object[].class).invoke(null, target, name, types, args);
+            return Boolean.TRUE.equals(result);
+        } catch (Throwable ignored) {
+            return false;
+        }
+    }
+
+    private static Object newKeyDescriptor(int domain, long namespace, String alias) {
+        try {
+            Class<?> hook = Class.forName("dev.farewell.pif.FarewellHook");
+            return hook.getMethod("newKeyDescriptor", int.class, long.class, String.class)
+                    .invoke(null, Integer.valueOf(domain), Long.valueOf(namespace), alias);
+        } catch (Throwable ignored) {
+            return null;
+        }
     }
 
     private static int asInt(Object value, int fallback) {

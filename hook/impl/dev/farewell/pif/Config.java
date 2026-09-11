@@ -407,6 +407,42 @@ final class Config {
             return true;
         }
 
+        /**
+         * Boot-state (locked/verified) property spoofing applies to the whole Google stack, not
+         * just the fingerprint targets: Play Store and GMS read ro.boot.* to decide "device not
+         * certified / lock bootloader". The fingerprint itself still follows propsFor().
+         */
+        boolean bootStateFor(String pkg, String process) {
+            if (pkg == null) return false;
+            if (pkg.equals("com.android.vending") || pkg.startsWith("com.google.android.gms")
+                    || pkg.equals("com.google.android.gsf")) {
+                return true;
+            }
+            return isTarget(pkg, process);
+        }
+
+        static boolean isBootStateKey(String key) {
+            if (key == null) return false;
+            switch (key) {
+                case "ro.boot.verifiedbootstate":
+                case "ro.boot.verifiedbootstate.color":
+                case "ro.boot.flash.locked":
+                case "ro.boot.vbmeta.device_state":
+                case "ro.boot.veritymode":
+                case "ro.boot.veritymode.managed":
+                case "vendor.boot.verifiedbootstate":
+                case "vendor.boot.vbmeta.device_state":
+                case "ro.debuggable":
+                case "ro.secure":
+                case "ro.adb.secure":
+                case "init.svc.adbd":
+                case "sys.usb.state":
+                    return true;
+                default:
+                    return false;
+            }
+        }
+
         JSONObject profileFor(String pkg) {
             JSONObject entry = pkg != null ? appProfiles.get(pkg) : null;
             JSONObject override = entry != null ? entry.optJSONObject("pf") : null;
@@ -458,15 +494,20 @@ final class Config {
             switch (key) {
                 case "ro.boot.verifiedbootstate":
                 case "ro.boot.verifiedbootstate.color":
+                case "vendor.boot.verifiedbootstate":
                     return "green";
                 case "ro.boot.flash.locked":
                     return "1";
+                case "ro.boot.vbmeta.device_state":
+                case "vendor.boot.vbmeta.device_state":
+                    return "locked";
                 case "ro.boot.veritymode":
                 case "ro.boot.veritymode.managed":
                     return "enforcing";
                 case "ro.debuggable":
                     return "0";
                 case "ro.secure":
+                case "ro.adb.secure":
                     return "1";
                 case "ro.build.type":
                     return "user";

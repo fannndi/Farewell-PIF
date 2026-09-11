@@ -26,11 +26,16 @@ import java.util.concurrent.atomic.AtomicBoolean;
  * - AndroidKeyStore provider wrapper (optional)
  */
 final class Props {
+    /**
+     * Exactly the fields PlayIntegrityFork spoofs: the five identifying Build values plus
+     * SECURITY_PATCH and DEVICE_INITIAL_SDK_INT. Everything else (BRAND, ID, RELEASE, TYPE,
+     * TAGS, INCREMENTAL, HOST, DISPLAY) stays real - spoofing them created a mixed identity
+     * that the Play Integrity server rejected outright.
+     */
     private static final String[] BUILD_FIELDS = {
-            "MANUFACTURER", "BRAND", "DEVICE", "PRODUCT", "MODEL",
-            "FINGERPRINT", "ID", "INCREMENTAL", "TYPE", "TAGS", "HOST", "DISPLAY"
+            "MANUFACTURER", "MODEL", "FINGERPRINT", "PRODUCT", "DEVICE"
     };
-    private static final String[] VERSION_FIELDS = {"RELEASE", "INCREMENTAL", "SECURITY_PATCH"};
+    private static final String[] VERSION_FIELDS = {"SECURITY_PATCH"};
 
     private static final AtomicBoolean sSignatureInstalled = new AtomicBoolean(false);
 
@@ -69,13 +74,11 @@ final class Props {
         if (profile == null) return;
         for (String name : BUILD_FIELDS) {
             String value = Config.Snapshot.profileString(profile, name);
-            if (value == null) continue;
-            setStaticField(Build.class, name, value);
+            if (value != null) setStaticField(Build.class, name, value);
         }
         for (String name : VERSION_FIELDS) {
             String value = Config.Snapshot.profileString(profile, name);
-            if (value == null) continue;
-            setStaticField(Build.VERSION.class, name, value);
+            if (value != null) setStaticField(Build.VERSION.class, name, value);
         }
         // Build.VERSION.DEVICE_INITIAL_SDK_INT is an int field (API 31+).
         String initialSdk = Config.Snapshot.profileString(profile, "DEVICE_INITIAL_SDK_INT");

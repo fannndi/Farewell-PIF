@@ -62,9 +62,9 @@ Java_dev_farewell_pif_NativeProps_nativeGetReal(JNIEnv *env, jclass clazz, jstri
     return (*env)->NewStringUTF(env, value);
 }
 
-// App-side probe: reads a synthetic key before/after installing the hook.
+// App-side probe (Diag module): reads a synthetic key before/after installing the hook.
 JNIEXPORT jstring JNICALL
-Java_dev_farewell_pif_app_MainActivity_nativeProbe(JNIEnv *env, jobject thiz) {
+Java_dev_farewell_pif_app_Diag_nativeProbe(JNIEnv *env, jclass clazz) {
     char before[PROP_VALUE_MAX];
     before[0] = '\0';
     __system_property_get("ro.farewell.native.probe", before);
